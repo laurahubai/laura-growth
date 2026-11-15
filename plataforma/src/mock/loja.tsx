@@ -1,14 +1,15 @@
 "use client";
 // Camada única de dados do mock. Para ligar o backend, trocar as ações abaixo por chamadas à API.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { Dados, Etapa, KitMarca, Pauta, Post, Rede, Texto, Versao, Visual } from "./types";
+import type { Dados, Etapa, KitMarca, Organizacao, Pauta, Post, Rede, Texto, Versao, Visual } from "./types";
 import { dadosDeExemplo, VERSAO_DADOS } from "./exemplo";
-import { consumoFicticio, gerarTexto, gerarVisual, passosAoVivo, revisar, sugerirPauta } from "./agente-falso";
+import { consumoFicticio, gerarTexto, gerarVisual, passosAoVivo, revisar, sugerirPauta, type ItemDoPlano } from "./agente-falso";
 
 const CHAVE = "laura-growth-mock";
 const CHAVE_SESSAO = "laura-growth-mock-sessao";
 const espera = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const agora = () => new Date().toISOString();
+const NOME_ETAPA: Record<number, string> = { 1: "Pauta", 2: "Texto", 3: "Visual", 4: "Revisão" };
 const novoId = (p: string) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 interface Sessao {
@@ -61,9 +62,9 @@ function useLojaInterna() {
 
   /** Simula o agente trabalhando ao vivo e grava custo (CST-01). */
   const rodarAgente = useCallback(
-    async (postId: string, etapa: Etapa, comentario?: string) => {
+    async (postId: string, etapa: Etapa, comentario?: string, encadeado = false): Promise<void> => {
       const { agente, passos } = passosAoVivo(etapa, !!comentario);
-      mudarPost(postId, (p) => ({ ...p, trabalhando: true, atividade: [{ em: agora(), texto: `${agente} começou` }] }));
+      mudarPost(postId, (p) => ({ ...p, trabalhando: true, atividade: [...(encadeado ? p.atividade : []), { em: agora(), texto: `${agente} começou: ${NOME_ETAPA[etapa]}` }] }));
       for (const passo of passos) {
         await espera(650);
         mudarPost(postId, (p) => ({ ...p, atividade: [...p.atividade, { em: agora(), texto: passo }] }));
@@ -102,7 +103,7 @@ function useLojaInterna() {
                       versoes: anterior
                         ? [...p.versoes, { id: novoId("v"), etapa, autor: "ia", em: agora(), comentario, conteudo: anterior }]
                         : p.versoes,
-                      atividade: [...p.atividade, { em: agora(), texto: "Pronto. Aguardando sua revisão." }],
+                      atividade: [...p.atividade, { em: agora(), texto: p.piloto ? `${NOME_ETAPA[etapa]}: concluída.` : "Pronto. Aguardando sua revisão." }],
                       historico: [...p.historico, { em: agora(), quem: agente, acao: comentario ? `Gerou nova versão (etapa ${etapa})` : `Concluiu a etapa ${etapa}` }],
                     },
               ),
@@ -125,6 +126,22 @@ function useLojaInterna() {
             }
           : dd,
       );
+      // Piloto automático (POST-09): segue sozinho até a aprovação final, que continua obrigatória.
+      await espera(80);
+      const depois = ref.current?.posts.find((p) => p.id === postId);
+      if (!depois || !depois.piloto || depois.descartado || depois.etapa !== etapa || etapa > 4) return;
+      const prox = (etapa + 1) as Etapa;
+      mudarPost(postId, (p) => ({
+        ...p,
+        etapa: prox,
+        trabalhando: prox <= 4,
+        atividade: prox === 5 ? [...p.atividade, { em: agora(), texto: "Pronto. Aguardando sua aprovação final." }] : p.atividade,
+        historico: [...p.historico, { em: agora(), quem: "Piloto automático", acao: `Seguiu para a etapa ${prox} sem parar` }],
+      }));
+      if (prox <= 4) {
+        await espera(80);
+        await rodarAgente(postId, prox, undefined, true);
+      }
     },
     [mudarPost],
   );
@@ -154,13 +171,16 @@ function useLojaInterna() {
       ),
     novoPost: (origem: "sugestao" | "pedido", pauta: Pauta, data: string) => {
       const id = novoId("post");
+      const piloto = !!ref.current?.orgs.find((o) => o.id === sessao!.orgId)?.pilotoAutomatico;
+      const direto = piloto && origem === "pedido"; // a pauta veio da pessoa: o agente já parte para o texto
       const post: Post = {
         id,
         orgId: sessao!.orgId,
         origem,
-        etapa: 1,
+        etapa: direto ? 2 : 1,
         data,
         descartado: false,
+        piloto,
         pauta,
         versoes: [],
         historico: [evento(origem === "pedido" ? "Pediu um novo post" : "Pediu uma sugestão de pauta")],
@@ -169,18 +189,60 @@ function useLojaInterna() {
       };
       setDados((d) => (d ? { ...d, posts: [post, ...d.posts] } : d));
       if (origem === "sugestao") setTimeout(() => rodarAgente(id, 1), 50);
+      else if (direto) setTimeout(() => rodarAgente(id, 2), 50);
       return id;
     },
-    aprovarEtapa: (postId: string) => {
+    /** Plano semanal em lote (CAL-04). Aprovar o plano cria os posts; não aprova nenhum para publicação. */
+    criarPlano: (itens: ItemDoPlano[], orgId?: string) => {
+      const alvo = orgId ?? sessao!.orgId;
+      const piloto = !!ref.current?.orgs.find((o) => o.id === alvo)?.pilotoAutomatico;
+      const novos: Post[] = itens.map((it) => ({
+        id: novoId("post"),
+        orgId: alvo,
+        origem: "sugestao",
+        etapa: piloto ? 2 : 1,
+        data: it.data,
+        descartado: false,
+        piloto,
+        pauta: it.pauta,
+        versoes: [],
+        historico: [{ em: agora(), quem: "Strategy Agent", acao: "Propôs a pauta no plano semanal" }, evento("Aprovou o plano semanal")],
+        atividade: [],
+        trabalhando: false,
+      }));
+      const custosPlano = novos.map((p) => {
+        const c = consumoFicticio(1);
+        return { id: novoId("custo"), orgId: alvo, postId: p.id, agente: "Strategy Agent" as const, etapa: 1 as Etapa, fornecedor: c.fornecedor, unidade: c.unidade, quantidade: c.quantidade, precoUnitarioUsd: c.preco, custoUsd: c.quantidade * c.preco, em: agora() };
+      });
+      setDados((d) => (d ? { ...d, posts: [...novos, ...d.posts], custos: [...d.custos, ...custosPlano] } : d));
+      if (piloto)
+        setTimeout(async () => {
+          for (const p of novos) await rodarAgente(p.id, 2); // um post por vez
+        }, 80);
+      return novos.length;
+    },
+    /** Onboarding de nova marca (MKT-05): cria a organização e já entra nela. */
+    criarOrg: (org: Organizacao, itens: ItemDoPlano[]) => {
+      setDados((d) => (d ? { ...d, orgs: [...d.orgs, org] } : d));
+      setSessao((s) => (s ? { ...s, orgId: org.id } : s));
+      if (itens.length) setTimeout(() => acoes.criarPlano(itens, org.id), 150); // depois de a organização existir
+    },
+    salvarPiloto: (pilotoAutomatico: boolean) =>
+      setDados((d) => (d ? { ...d, orgs: d.orgs.map((o) => (o.id === sessao?.orgId ? { ...o, pilotoAutomatico } : o)) } : d)),
+    /** Pausa o piloto neste post: o agente termina o passo atual e espera a pessoa. */
+    pausarPiloto: (postId: string) =>
+      mudarPost(postId, (x) => ({ ...x, piloto: false, historico: [...x.historico, evento("Pausou o piloto automático neste post")] })),
+    aprovarEtapa: (postId: string, retomarPiloto = false) => {
       const p = ref.current!.posts.find((x) => x.id === postId)!;
       const prox = (p.etapa + 1) as Etapa;
       mudarPost(postId, (x) => ({
         ...x,
         etapa: prox,
+        piloto: retomarPiloto ? true : x.piloto,
         aprovadoPor: p.etapa === 5 ? quem : x.aprovadoPor,
         historico: [...x.historico, evento(p.etapa === 5 ? "Aprovou o post (aprovação final)" : `Aprovou a etapa ${p.etapa}`)],
       }));
-      if (prox <= 4) setTimeout(() => rodarAgente(postId, prox), 50);
+      if (prox <= 4) setTimeout(() => rodarAgente(postId, prox), 80);
     },
     pedirAjuste: (postId: string, comentario: string) => {
       const p = ref.current!.posts.find((x) => x.id === postId)!;
@@ -195,7 +257,7 @@ function useLojaInterna() {
       mudarPost(postId, (x) => ({
         ...x,
         [campo]: valor,
-        versoes: x[campo] ? [...x.versoes, { id: novoId("v"), etapa: x.etapa, autor: "ia", em: agora(), conteudo: x[campo]! }] : x.versoes,
+        versoes: x[campo] ? [...x.versoes, { id: novoId("v"), etapa: (campo === "pauta" ? 1 : campo === "texto" ? 2 : 3) as Etapa, autor: "ia", em: agora(), conteudo: x[campo]! }] : x.versoes,
         historico: [...x.historico, evento(`Editou à mão (${campo})`)],
       })),
     restaurarVersao: (postId: string, versaoId: string) =>

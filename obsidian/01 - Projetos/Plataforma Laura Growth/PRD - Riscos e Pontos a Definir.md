@@ -30,7 +30,7 @@ Parte do [[PRD - Plataforma Laura Growth]].
 - [ ] Datas de cada fase
 
 ### Produto
-- [ ] Quais etapas do fluxo de criação são paradas obrigatórias
+- [x] Quais etapas do fluxo de criação são paradas obrigatórias: só a aprovação final (decidido em 2026-11-15)
 - [ ] Cadência padrão por rede
 - [ ] Canal dos avisos de aprovação pendente
 - [ ] Lista final de permissões

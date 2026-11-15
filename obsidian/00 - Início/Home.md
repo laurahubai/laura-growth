@@ -15,7 +15,7 @@ Comece por aqui. Cada item abaixo é um clique.
 - [[Checklist de Validação Pré-Lançamento]]
 - [[Registro de Decisões]]
 - [[PRD - Plataforma Laura Growth]] — PRD da plataforma
-  - Construção: [[Roteiro de Construção - Fase 1A]] · [[Design System - Plataforma Laura Growth]] · [[Benchmark - Cor de Marca]] · [[Tecnologias de Base]] · [[Especificação - Frontend Mockado]]
+  - Construção: [[Roteiro de Construção - Fase 1A]] · [[Design System - Plataforma Laura Growth]] · [[Benchmark - Cor de Marca]] · [[Tecnologias de Base]] · [[Especificação - Frontend Mockado]] · [[Processo de Posicionamento Digital - Análise e Sugestões]]
   - Comece por: [[PRD - Fases e Escopo]] · [[PRD - Fase 1 - MVP de Posts]] · [[PRD - Decisões de Negócio]]
   - Demais partes: [[PRD - Público e Perfis]] · [[PRD - Modelo de Organizações]] · [[PRD - Agentes de IA]] · [[PRD - Painel de Custos e Créditos]] · [[PRD - Permissões e Aprovações]] · [[PRD - Conexões com Plataformas]] · [[PRD - Conformidade e Regras do Setor]] · [[PRD - Indicadores de Sucesso]] · [[PRD - Riscos e Pontos a Definir]]
 
@@ -30,6 +30,7 @@ Comece por aqui. Cada item abaixo é um clique.
 ## 📚 Recursos (consulta)
 - [[Glossário]]
 - [[Benchmark - Crush AI]] — fluxo e telas de um concorrente (anúncios com IA)
+- [[Referência UX-UI - Crush AI]] — comportamento, visual e demo do site trycrush.ai
 - [[laura-growth (original)]]
 
 ## 🗄️ Arquivo e Sistema

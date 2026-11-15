@@ -54,16 +54,21 @@ Pronto quando:
 - [ ] Você troca de uma para a outra e cada uma mostra só o que é dela.
 
 ## Etapa 2 — Kit de marca
-**Constrói:** tela para cadastrar e editar o kit de cada organização; envio de arquivos.
-**Requisitos:** MKT-01, MKT-03.
+**Constrói:** tela para cadastrar e editar o kit de cada organização, incluindo os pilares de conteúdo; envio de arquivos; onboarding assistido, em que o agente rascunha o kit a partir do site e dos perfis da marca.
+**Requisitos:** MKT-01, MKT-03, MKT-04, MKT-05.
 
 Pronto quando:
 - [ ] Os dois kits estão cadastrados com o material da etapa 0.
 - [ ] O kit de uma organização não aparece na outra.
+- [ ] Cada kit tem de 3 a 5 pilares de conteúdo.
+- [ ] Você informa site e perfis de uma marca, recebe um rascunho do kit e corrige antes de salvar.
+
+O plano do primeiro mês, que fecha o onboarding, só passa a existir na etapa 6.
 
 ## Etapa 3 — Pauta e texto, com intervenção humana
 **Constrói:** o começo do fluxo de criação (etapas 1 e 2 do fluxo: pauta e texto), com os quatro comandos em cada passo: aprovar, pedir ajuste, editar à mão, descartar. O registro de tokens e custo nasce junto, mesmo sem tela ainda.
-**Requisitos:** POST-01, POST-02, POST-03, POST-04, AGT-01, AGT-03, CST-01.
+Cada post nasce com pilar, objetivo e CTA. O agente avança sozinho pelas etapas (piloto automático) e você intervém quando quiser.
+**Requisitos:** POST-01, POST-02, POST-03, POST-04, POST-07, POST-08, POST-09, AGT-01, AGT-03, CST-01.
 
 Pronto quando:
 - [ ] Você pede um post ou aceita uma sugestão de pauta.
@@ -71,6 +76,8 @@ Pronto quando:
 - [ ] Você pede um ajuste com um comentário e recebe nova versão.
 - [ ] As versões anteriores ficam guardadas.
 - [ ] Cada tarefa do agente grava tokens e custo em dólar.
+- [ ] Cada post mostra seu pilar, seu objetivo (atrair, engajar ou converter) e seu CTA.
+- [ ] O agente passa da pauta ao texto sem esperar por você, e você consegue intervir no meio.
 
 ## Etapa 4 — Imagem e carrossel
 **Constrói:** a parte visual do fluxo, usando o kit de marca; envio de material avulso para um post.
@@ -85,25 +92,28 @@ Pronto quando:
 **A decidir nesta etapa:** arte criada do zero pela IA ou preenchimento de modelos visuais prontos. Recomendação: começar por modelos prontos, que mantêm a marca consistente e custam menos; medir e depois avaliar a criação livre.
 
 ## Etapa 5 — Revisão, aprovação final e entrega manual
-**Constrói:** conferência automática (marca, ortografia, formato), prévia de como o post fica em cada rede, aprovação final obrigatória e o botão para baixar o post pronto (imagens e texto).
-**Requisitos:** APR-01, APR-02, PUB-03.
+**Constrói:** conferência automática (marca, ortografia, formato), prévia de como o post fica em cada rede, aprovação final obrigatória, fila para aprovar vários posts em sequência e o botão para baixar o post pronto (imagens e texto).
+**Requisitos:** APR-01, APR-02, APR-04, PUB-03.
 
 Pronto quando:
 - [ ] Nenhum post chega ao estado "aprovado" sem a sua aprovação.
 - [ ] Você vê a prévia por rede antes de aprovar.
 - [ ] Você baixa o post aprovado e publica à mão.
+- [ ] Com vários posts aguardando, você aprova ou devolve um após o outro na mesma tela.
 
 **Primeiro marco:** a partir daqui você já economiza tempo na criação dos posts das duas marcas.
 
 ## Etapa 6 — Calendário e cadência
-**Constrói:** calendário por organização com os estados dos posts; cadência por rede; aviso quando o calendário está abaixo do planejado.
-**Requisitos:** CAL-01, CAL-02, CAL-03, APR-03.
+**Constrói:** calendário por organização com os estados dos posts; cadência por rede; aviso quando o calendário está abaixo do planejado; plano semanal em lote proposto pelo agente.
+**Requisitos:** CAL-01, CAL-02, CAL-03, CAL-04, APR-03.
 
 Pronto quando:
 - [ ] Você vê a semana e o mês de cada organização.
 - [ ] Cada post mostra seu estado.
 - [ ] A plataforma avisa quando faltam posts para cumprir a cadência.
 - [ ] Post sem aprovação até a data fica marcado como atrasado e não sai.
+- [ ] O agente propõe os posts da semana de uma vez, seguindo cadência e pilares, e você aprova o plano em uma tela.
+- [ ] Aprovar o plano cria os posts, mas nenhum fica aprovado para publicação sem a sua aprovação final.
 
 ## Etapa 7 — Painel de tokens e custos
 **Constrói:** a tela da visão Operação, usando os registros gravados desde a etapa 3.
@@ -138,7 +148,7 @@ Pronto quando:
 ---
 
 ## O que não construir agora
-Convites e permissões, vídeo, TikTok, anúncios, relatórios, alertas de regras do setor, créditos para o cliente, inglês. Tudo isso tem fase própria em [[PRD - Fases e Escopo]].
+Convites e permissões, vídeo, TikTok, anúncios, relatórios, medição de resultados por post, link rastreável, alertas de regras do setor, créditos para o cliente, inglês. Tudo isso tem fase própria em [[PRD - Fases e Escopo]].
 
 ## Dependências entre as etapas
 - A etapa 0 (autorizações) corre em paralelo e só é cobrada na etapa 8.

@@ -36,7 +36,10 @@ export default function Inicio() {
       </div>
       <div className="grid g2">
         <section className="card">
-          <h2>Precisa de você</h2>
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <h2>Precisa de você</h2>
+            {conta("aguardando_aprovacao") > 0 && <Link href="/aprovacoes" className="btn peq primario">Aprovar em sequência</Link>}
+          </div>
           {atencao.length === 0 ? (
             <p className="vazio">Nada pendente. Que tal criar um novo post?</p>
           ) : (
@@ -67,6 +70,7 @@ export default function Inicio() {
               </div>
             ))
           )}
+          {faltas.length > 0 && <Link href="/calendario?planejar=1" className="btn" style={{ alignSelf: "flex-start" }}>Planejar a semana com o agente</Link>}
           <p className="small muted row"><Clock size={14} aria-hidden /> Aviso de aprovação pendente aparece no sino da barra superior (canal externo: a definir).</p>
         </section>
       </div>

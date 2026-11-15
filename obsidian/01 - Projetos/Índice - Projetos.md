@@ -15,5 +15,6 @@ Projetos têm **começo, fim e entrega**. Quando terminam, vão para [[Índice -
 | Plataforma Laura Growth (cor de marca) | aprovado | [[Benchmark - Cor de Marca]] |
 | Plataforma Laura Growth (tecnologias) | em validação | [[Tecnologias de Base]] |
 | Plataforma Laura Growth (frontend mockado) | rascunho | [[Especificação - Frontend Mockado]] |
+| Plataforma Laura Growth (processo de posicionamento) | aprovado | [[Processo de Posicionamento Digital - Análise e Sugestões]] |
 
 Modelo para novos: [[Template - Projeto]] · Voltar: [[Home]]

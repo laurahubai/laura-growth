@@ -52,6 +52,7 @@ Construir uma plataforma em que **agentes de IA executam o marketing digital** d
 - [[Roteiro de Construção - Fase 1A]] — passo a passo da primeira entrega
 - [[Design System - Plataforma Laura Growth]] — regras visuais do frontend
 - [[Especificação - Frontend Mockado]] — telas com dados de exemplo para homologar a jornada
+- [[Processo de Posicionamento Digital - Análise e Sugestões]] — foco até 10/01/2027 e sugestões de automação a confirmar
 
 ## Termos usados neste PRD
 | Termo | Significado simples |

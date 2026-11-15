@@ -9,7 +9,7 @@ criado: 2026-11-15
 > Estudo de um concorrente de referência: **Crush AI** (trycrush.ai), um "gestor de anúncios com IA" para Meta (Facebook e Instagram).
 > Fonte: o site público e a demonstração do produto na home, consultados em 2026-11-15. A demo usa uma loja inventada (Marea, "Vestido Brisa") e **todos os números são exemplos** do próprio site. Não testamos o produto por dentro.
 
-Relacionado: [[PRD - Plataforma Laura Growth]] · [[PRD - Agentes de IA]] · [[PRD - Permissões e Aprovações]] · [[PRD - Painel de Custos e Créditos]]
+Relacionado: [[Referência UX-UI - Crush AI]] · [[PRD - Plataforma Laura Growth]] · [[PRD - Agentes de IA]] · [[PRD - Permissões e Aprovações]] · [[PRD - Painel de Custos e Créditos]]
 
 ## Estrutura das telas
 - **Barra lateral:** seletor de produto/loja · Home · Library (biblioteca) · Ads (anúncios) · Channels (canais): Meta ads (LIVE), Autopilot (ligado/desligado), Organic · saldo de **créditos** e usuário no rodapé.

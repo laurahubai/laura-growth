@@ -1,4 +1,4 @@
-import type { EstadoPost, Etapa, Formato, Organizacao, Post, Rede } from "./types";
+import type { EstadoPost, Etapa, Formato, Objetivo, Organizacao, Post, Rede } from "./types";
 
 export const ETAPAS: { n: Etapa; nome: string }[] = [
   { n: 1, nome: "Pauta" },
@@ -15,6 +15,12 @@ export const REDES: { id: Rede; nome: string; limite: number; tamanho: string }[
   { id: "linkedin", nome: "LinkedIn", limite: 3000, tamanho: "1200×1200" },
 ];
 export const nomeRede = (r: Rede) => REDES.find((x) => x.id === r)!.nome;
+export const OBJETIVOS: { id: Objetivo; nome: string; explica: string }[] = [
+  { id: "atrair", nome: "Atrair", explica: "Alcançar quem ainda não conhece a marca" },
+  { id: "engajar", nome: "Engajar", explica: "Criar conversa com quem já acompanha" },
+  { id: "converter", nome: "Converter", explica: "Levar a pessoa a dar um passo (contato, visita)" },
+];
+export const nomeObjetivo = (o: Objetivo) => OBJETIVOS.find((x) => x.id === o)?.nome ?? "—";
 export const nomeFormato = (f: Formato) => (f === "imagem" ? "Imagem com legenda" : "Carrossel");
 
 export const ESTADOS: Record<EstadoPost, { rotulo: string; tom: string }> = {
@@ -50,6 +56,15 @@ export const fmtHora = (iso: string) =>
   new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 export const fmtUsd = (n: number) => `US$ ${n.toFixed(4).replace(".", ",")}`;
 export const fmtNum = (n: number) => n.toLocaleString("pt-BR");
+
+const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** Os 7 dias (segunda a domingo) da semana atual (0) ou das seguintes (1, 2...). */
+export function diasDaSemana(deslocamento = 0): string[] {
+  const d = new Date();
+  const ini = new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7) + deslocamento * 7);
+  return Array.from({ length: 7 }, (_, i) => isoLocal(new Date(ini.getFullYear(), ini.getMonth(), ini.getDate() + i)));
+}
 
 export function semanaAtual(): [string, string] {
   const d = new Date();

@@ -1,6 +1,6 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "plataforma", "url": "http://localhost:3000", "port": 3000 }
+    { "name": "plataforma", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "plataforma", "run", "dev"], "port": 3000 }
   ]
 }

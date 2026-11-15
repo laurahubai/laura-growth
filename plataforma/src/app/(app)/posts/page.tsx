@@ -3,8 +3,8 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Sparkles, X } from "lucide-react";
 import { useLoja, usePostsDaOrg } from "@/mock/loja";
-import { ESTADOS, estadoDoPost, ETAPAS, fmtData, hoje, nomeFormato, nomeRede, REDES } from "@/mock/regras";
-import type { EstadoPost, Formato, Rede } from "@/mock/types";
+import { ESTADOS, estadoDoPost, ETAPAS, fmtData, hoje, nomeFormato, nomeObjetivo, nomeRede, OBJETIVOS, REDES } from "@/mock/regras";
+import type { EstadoPost, Formato, Objetivo, Rede } from "@/mock/types";
 import { PageHeader, StatusBadge } from "@/components/ui";
 
 function Lista() {
@@ -15,7 +15,8 @@ function Lista() {
   const [aberto, setAberto] = useState(false);
   const [filtro, setFiltro] = useState<EstadoPost | "todos">("todos");
   const [tema, setTema] = useState("");
-  const [objetivo, setObjetivo] = useState("");
+  const [objetivo, setObjetivo] = useState<Objetivo>("atrair");
+  const [pilar, setPilar] = useState("");
   const [redes, setRedes] = useState<Rede[]>(["instagram"]);
   const [formato, setFormato] = useState<Formato>("imagem");
   const [data, setData] = useState(hoje());
@@ -31,7 +32,7 @@ function Lista() {
     .sort((a, b) => b.p.data.localeCompare(a.p.data));
 
   const criar = (origem: "sugestao" | "pedido") => {
-    const id = novoPost(origem, origem === "pedido" ? { tema, objetivo, redes, formato } : { tema: "(o agente vai sugerir)", objetivo: "", redes: ["instagram"], formato: "imagem" }, data);
+    const id = novoPost(origem, origem === "pedido" ? { tema, pilar: pilar || org.kit.pilares[0] || "", objetivo, redes, formato } : { tema: "(o agente vai sugerir)", pilar: "", objetivo: "atrair", redes: ["instagram"], formato: "imagem" }, data);
     router.push(`/posts/${id}`);
   };
 
@@ -60,12 +61,14 @@ function Lista() {
         ) : (
           <table>
             <thead>
-              <tr><th>Tema</th><th>Etapa</th><th>Redes</th><th>Formato</th><th>Data</th><th>Situação</th></tr>
+              <tr><th>Tema</th><th>Pilar</th><th>Objetivo</th><th>Etapa</th><th>Redes</th><th>Formato</th><th>Data</th><th>Situação</th></tr>
             </thead>
             <tbody>
               {lista.map(({ p, e }) => (
                 <tr key={p.id} className="clicavel" onClick={() => router.push(`/posts/${p.id}`)}>
                   <td><a href={`/posts/${p.id}`} onClick={(ev) => ev.preventDefault()}>{p.pauta.tema}</a></td>
+                  <td className="muted">{p.pauta.pilar || "—"}</td>
+                  <td className="muted">{nomeObjetivo(p.pauta.objetivo)}</td>
                   <td className="muted">{p.etapa}. {ETAPAS[p.etapa - 1].nome}</td>
                   <td className="muted">{p.pauta.redes.map(nomeRede).join(", ")}</td>
                   <td className="muted">{nomeFormato(p.pauta.formato)}</td>
@@ -91,12 +94,24 @@ function Lista() {
             </label>
             <div className="card stack" style={{ background: "var(--laura-ai-soft)", borderColor: "transparent" }}>
               <h3 style={{ margin: 0 }}>Deixar o agente sugerir</h3>
-              <p className="small muted">O Strategy Agent lê o kit de marca e o calendário e propõe tema, objetivo, rede e formato.</p>
+              <p className="small muted">O Strategy Agent lê o kit de marca e o calendário e propõe tema, pilar, objetivo, rede e formato.{org.pilotoAutomatico ? " Com o piloto automático ligado, ele segue sozinho até a aprovação final." : ""}</p>
               <button className="btn" onClick={() => criar("sugestao")}><Sparkles size={16} aria-hidden /> Pedir sugestão de pauta</button>
             </div>
             <h3 style={{ margin: "8px 0 0" }}>Ou descreva o que você quer</h3>
             <label className="campo">Tema<input value={tema} onChange={(e) => setTema(e.target.value)} placeholder="Ex.: Dicas para manter a cadência" /></label>
-            <label className="campo">Objetivo<input value={objetivo} onChange={(e) => setObjetivo(e.target.value)} placeholder="Ex.: Gerar salvamentos" /></label>
+            <label className="campo">
+              Pilar de conteúdo
+              <select value={pilar || org.kit.pilares[0] || ""} onChange={(e) => setPilar(e.target.value)}>
+                {org.kit.pilares.length === 0 && <option value="">Cadastre os pilares no kit de marca</option>}
+                {org.kit.pilares.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </label>
+            <label className="campo">
+              Objetivo
+              <select value={objetivo} onChange={(e) => setObjetivo(e.target.value as Objetivo)}>
+                {OBJETIVOS.map((o) => <option key={o.id} value={o.id}>{o.nome} — {o.explica}</option>)}
+              </select>
+            </label>
             <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0, gap: 6 }}>
               <legend className="small" style={{ fontWeight: 500, marginBottom: 6 }}>Redes</legend>
               {REDES.map((r) => (

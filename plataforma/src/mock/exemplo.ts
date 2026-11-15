@@ -2,7 +2,7 @@
 import type { Dados, Etapa, Organizacao, Post, RegistroCusto } from "./types";
 import { gerarTexto, gerarVisual } from "./agente-falso";
 
-export const VERSAO_DADOS = 1;
+export const VERSAO_DADOS = 2;
 
 const dia = (delta: number) => {
   const d = new Date();
@@ -21,11 +21,15 @@ const orgs: Organizacao[] = [
       fontes: "Inter",
       tomDeVoz: "Próximo, direto e confiante. Sem exageros.",
       temas: "marketing com IA, constância, bastidores, produtividade",
+      pilares: ["marketing com IA", "constância de publicação", "bastidores da Laura", "rotina do marketing de clínicas"],
+      site: "(exemplo) site da Laura Growth",
+      perfis: "(exemplo) @lauragrowth",
       publico: "Donos e responsáveis de marketing de clínicas de estética de porte médio",
       nuncaDizer: "mágica, 100% automático, garantido",
       exemplos: "(exemplo) Post sobre os bastidores da criação de conteúdo com IA",
     },
     cadencia: { instagram: 3, facebook: 2, linkedin: 2 },
+    pilotoAutomatico: true,
     conexoes: { instagram: "nao_conectada", facebook: "nao_conectada", linkedin: "nao_conectada" },
   },
   {
@@ -37,11 +41,15 @@ const orgs: Organizacao[] = [
       fontes: "Inter",
       tomDeVoz: "Acolhedor, profissional e organizado.",
       temas: "gestão de clínica, agenda, atendimento, estética",
+      pilares: ["gestão da clínica", "agenda e atendimento", "histórias de clínicas", "novidades do produto"],
+      site: "(exemplo) site da Laura Hub",
+      perfis: "(exemplo) @laurahub",
       publico: "Gestores de clínicas de estética",
       nuncaDizer: "milagre, resultado garantido",
       exemplos: "(exemplo) Dica de organização da agenda da clínica",
     },
     cadencia: { instagram: 3, facebook: 1, linkedin: 1 },
+    pilotoAutomatico: true,
     conexoes: { instagram: "nao_conectada", facebook: "nao_conectada", linkedin: "nao_conectada" },
   },
 ];
@@ -50,7 +58,7 @@ let seq = 0;
 const id = (p: string) => `${p}-${++seq}`;
 
 function montar(org: Organizacao, tema: string, etapa: Etapa, data: number, extra: Partial<Post> = {}): Post {
-  const pauta = { tema, objetivo: "Educar e gerar salvamentos", redes: ["instagram", "linkedin"] as Post["pauta"]["redes"], formato: (seq % 2 ? "carrossel" : "imagem") as "carrossel" | "imagem" };
+  const pauta = { tema, pilar: org.kit.pilares[seq % org.kit.pilares.length], objetivo: (["atrair", "engajar", "converter"] as const)[seq % 3], redes: ["instagram", "linkedin"] as Post["pauta"]["redes"], formato: (seq % 2 ? "carrossel" : "imagem") as "carrossel" | "imagem" };
   const texto = etapa >= 2 ? gerarTexto(org, pauta) : undefined;
   const visual = etapa >= 3 ? gerarVisual(pauta) : undefined;
   return {
@@ -60,6 +68,7 @@ function montar(org: Organizacao, tema: string, etapa: Etapa, data: number, extr
     etapa,
     data: dia(data),
     descartado: false,
+    piloto: true,
     pauta,
     texto,
     visual,
@@ -102,6 +111,8 @@ export function dadosDeExemplo(): Dados {
   const posts: Post[] = [
     montar(lg, "3 sinais de que seu marketing perdeu a cadência", 6, -3, { publicacao: "publicado", aprovadoPor: "Você" }),
     montar(lg, "Como planejar um mês de posts em 1 hora", 5, 1),
+    montar(lg, "O que muda quando a marca publica toda semana", 5, 2),
+    montar(lg, "Bastidores: como a Laura revisa um post", 5, 4),
     montar(lg, "Bastidores: um post do pedido à aprovação", 2, 2, { origem: "pedido" }),
     montar(lg, "Erros comuns ao terceirizar o marketing", 3, -1),
     montar(lg, "Ideia descartada: tendências do ano", 2, 0, { descartado: true }),

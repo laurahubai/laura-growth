@@ -45,6 +45,7 @@ Parte do [[PRD - Plataforma Laura Growth]]. Decisões tomadas na jornada de perg
 | Quem constrói | O fundador, com ferramentas de IA |
 | Ferramenta de construção | Claude Code (decidido em 2026-11-15) |
 | Prioridade | MVP de automação de posts, o quanto antes |
+| Foco até 10/01/2027 | Somente posts da Laura Hub e da Laura Growth, como máquina de automação de posicionamento digital. Growth orientado por métricas fica para depois dessa data (decidido em 2026-11-15; ver [[Processo de Posicionamento Digital - Análise e Sugestões]]) |
 | Primeiro teste | Marketing da Laura Growth e da Laura Hub; depois uma clínica parceira real |
 | Divisão em fases | Aprovada, incluindo 1A (imagem e carrossel) e 1B (vídeo e TikTok) |
 | Cor da marca na plataforma | Coral própria (diferente do azul da Laura Hub), com botões principais em grafite (decidido em 2026-11-15; ver [[Benchmark - Cor de Marca]]) |
@@ -58,6 +59,8 @@ Parte do [[PRD - Plataforma Laura Growth]]. Decisões tomadas na jornada de perg
 | Formatos | Imagem com legenda, carrossel, vídeo curto |
 | Material | Kit de marca como base, mais material avulso |
 | Aprovação | Post a post, com intervenção humana durante a criação |
+| Paradas obrigatórias | Só a aprovação final (etapa 5); nas etapas 1 a 4 o agente segue sozinho (decidido em 2026-11-15) |
+| Automação aprovada para a fase 1A | Plano semanal em lote, onboarding assistido, pilares de conteúdo, pilar e objetivo em cada post, fila de aprovação, piloto automático, CTA em cada post (decidido em 2026-11-15; ver [[Processo de Posicionamento Digital - Análise e Sugestões]]) |
 
 ## Evolução em relação ao conceito original
 - **Antes:** "agência de IA que executa marketing para o cliente" ([[Laura Growth - Posicionamento]]).

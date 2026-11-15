@@ -1,11 +1,11 @@
 "use client";
 import Link from "next/link";
 import { use, useState } from "react";
-import { ArrowLeft, Check, Download, MessageSquare, Pencil, RotateCcw, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, Check, Download, MessageSquare, Pause, Pencil, RotateCcw, Sparkles, Trash2, Upload } from "lucide-react";
 import { useLoja } from "@/mock/loja";
-import { estadoDoPost, ETAPAS, fmtData, fmtHora, fmtNum, fmtUsd, nomeFormato, nomeRede, REDES } from "@/mock/regras";
-import type { Formato, Organizacao, Pauta, Post, Rede, Texto, Visual } from "@/mock/types";
-import { PageHeader, SlideArte, StatusBadge, TagIA } from "@/components/ui";
+import { estadoDoPost, ETAPAS, fmtData, fmtHora, fmtNum, fmtUsd, nomeFormato, nomeObjetivo, nomeRede, OBJETIVOS, REDES } from "@/mock/regras";
+import type { Formato, Objetivo, Organizacao, Pauta, Post, Texto, Visual } from "@/mock/types";
+import { EtiquetasPauta, PageHeader, Previas, SlideArte, StatusBadge, TagIA } from "@/components/ui";
 
 export default function DetalhePost({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -31,7 +31,7 @@ export default function DetalhePost({ params }: { params: Promise<{ id: string }
       <PageHeader
         titulo={post.pauta.tema}
         descricao={`${nomeFormato(post.pauta.formato)} · ${post.pauta.redes.map(nomeRede).join(", ")} · previsto para ${fmtData(post.data)}`}
-        acoes={<StatusBadge estado={estado} />}
+        acoes={<><EtiquetasPauta pauta={post.pauta} /><StatusBadge estado={estado} /></>}
       />
       <ol className="stepper" aria-label="Etapas do post" style={{ listStyle: "none", padding: 0 }}>
         {ETAPAS.map((e) => (
@@ -52,10 +52,29 @@ export default function DetalhePost({ params }: { params: Promise<{ id: string }
             {post.etapa === 2 && <VerTexto post={post} />}
             {post.etapa === 3 && <VerVisual post={post} org={org} />}
             {post.etapa === 4 && <VerRevisao post={post} />}
-            {post.etapa === 5 && <Previas post={post} org={org} />}
+            {post.etapa === 5 && (
+              <div className="stack">
+                <h2 style={{ margin: 0 }}>Como vai ficar em cada rede</h2>
+                <p className="muted">Confira e aprove. Nada vai ao ar sem esta aprovação.</p>
+                <Previas post={post} org={org} />
+                {post.revisao && post.revisao.avisos.some((a) => !a.startsWith("Nenhum")) && post.revisao.avisos.map((a, i) => <div key={i} className="alerta t-warning">{a}</div>)}
+              </div>
+            )}
             {post.etapa === 6 && <Publicacao post={post} org={org} />}
 
-            {post.trabalhando && <p className="row muted"><span className="pulsar" /> O agente está trabalhando. Acompanhe ao lado.</p>}
+            {post.trabalhando && (
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="row muted"><span className="pulsar" /> {post.piloto ? "Piloto automático: o agente segue sozinho até a aprovação final." : "O agente está trabalhando. Acompanhe ao lado."}</span>
+                {post.piloto && (
+                  <button className="btn peq" onClick={() => loja.pausarPiloto(post.id)} title="O agente termina o passo atual e espera você">
+                    <Pause size={14} aria-hidden /> Pausar para eu revisar
+                  </button>
+                )}
+              </div>
+            )}
+            {!post.trabalhando && !post.piloto && post.etapa <= 4 && !post.descartado && org.pilotoAutomatico && (
+              <div className="alerta t-neutral">Piloto automático pausado neste post. O agente espera você em cada etapa.</div>
+            )}
 
             {post.etapa <= 5 && !post.descartado && (
               <div className="row" style={{ borderTop: "1px solid var(--laura-border)", paddingTop: 12 }}>
@@ -65,9 +84,14 @@ export default function DetalhePost({ params }: { params: Promise<{ id: string }
                 <button className="btn" disabled={bloqueado} onClick={() => setModo(modo === "ajuste" ? "nada" : "ajuste")}>
                   <MessageSquare size={16} aria-hidden /> {post.etapa === 5 ? "Devolver com comentário" : "Pedir ajuste"}
                 </button>
-                {post.etapa <= 3 && (
+                {post.etapa <= 4 && !post.piloto && org.pilotoAutomatico && (
+                  <button className="btn" disabled={bloqueado || (post.etapa === 1 && post.pauta.tema.startsWith("("))} onClick={() => { fechar(); loja.aprovarEtapa(post.id, true); }}>
+                    <Sparkles size={16} aria-hidden /> Retomar piloto automático
+                  </button>
+                )}
+                {(post.etapa <= 3 || post.etapa === 5) && (
                   <button className="btn" disabled={bloqueado} onClick={() => setModo(modo === "editar" ? "nada" : "editar")}>
-                    <Pencil size={16} aria-hidden /> Editar à mão
+                    <Pencil size={16} aria-hidden /> {post.etapa === 5 ? "Editar texto à mão" : "Editar à mão"}
                   </button>
                 )}
                 <button className="btn perigo" disabled={bloqueado} onClick={() => { if (confirm("Descartar este post? Ele sai do calendário, mas o histórico e o custo ficam guardados.")) loja.descartar(post.id); }}>
@@ -90,7 +114,7 @@ export default function DetalhePost({ params }: { params: Promise<{ id: string }
                 </div>
               </div>
             )}
-            {modo === "editar" && <Editor post={post} aoSalvar={fechar} />}
+            {modo === "editar" && <Editor post={post} org={org} aoSalvar={fechar} />}
           </section>
 
           <section className="card">
@@ -179,7 +203,8 @@ function VerPauta({ post }: { post: Post }) {
       <div className="row"><h2 style={{ margin: 0 }}>Pauta</h2>{post.origem === "sugestao" ? <TagIA texto="Sugestão da Laura" /> : <span className="badge t-neutral">Pedido seu</span>}</div>
       <dl className="grid g2" style={{ margin: 0 }}>
         <div><dt className="small muted">Tema</dt><dd style={{ margin: 0 }}>{post.pauta.tema}</dd></div>
-        <div><dt className="small muted">Objetivo</dt><dd style={{ margin: 0 }}>{post.pauta.objetivo || "—"}</dd></div>
+        <div><dt className="small muted">Pilar de conteúdo</dt><dd style={{ margin: 0 }}>{post.pauta.pilar || "—"}</dd></div>
+        <div><dt className="small muted">Objetivo</dt><dd style={{ margin: 0 }}>{nomeObjetivo(post.pauta.objetivo)} <span className="small muted">· {OBJETIVOS.find((o) => o.id === post.pauta.objetivo)?.explica}</span></dd></div>
         <div><dt className="small muted">Redes</dt><dd style={{ margin: 0 }}>{post.pauta.redes.map(nomeRede).join(", ")}</dd></div>
         <div><dt className="small muted">Formato</dt><dd style={{ margin: 0 }}>{nomeFormato(post.pauta.formato)}</dd></div>
       </dl>
@@ -194,6 +219,7 @@ function VerTexto({ post }: { post: Post }) {
     <div className="stack">
       <div className="row"><h2 style={{ margin: 0 }}>Texto</h2><TagIA /></div>
       <div className="legenda">{post.texto.legenda}</div>
+      <div><span className="small muted">Chamada para ação (CTA)</span><div><b>{post.texto.cta || "Sem CTA"}</b></div></div>
       <p style={{ color: "var(--laura-brand-strong)" }}>{post.texto.hashtags}</p>
       <p className="small muted num">{post.texto.legenda.length} caracteres</p>
     </div>
@@ -244,35 +270,11 @@ function VerRevisao({ post }: { post: Post }) {
   );
 }
 
-function Previas({ post, org }: { post: Post; org: Organizacao }) {
-  return (
-    <div className="stack">
-      <h2 style={{ margin: 0 }}>Como vai ficar em cada rede</h2>
-      <p className="muted">Confira e aprove. Nada vai ao ar sem esta aprovação.</p>
-      <div className="grid g2">
-        {post.pauta.redes.map((r) => <Previa key={r} rede={r} post={post} org={org} />)}
-      </div>
-    </div>
-  );
-}
-
-function Previa({ rede, post, org }: { rede: Rede; post: Post; org: Organizacao }) {
-  const lim = REDES.find((x) => x.id === rede)!.limite;
-  const texto = `${post.texto?.legenda ?? ""}\n\n${post.texto?.hashtags ?? ""}`;
-  return (
-    <div className="previa">
-      <div className="previa-topo"><span className="previa-avatar" style={{ background: org.kit.cores[0] }} />{org.nome} <span className="muted small" style={{ marginLeft: "auto" }}>{nomeRede(rede)}</span></div>
-      {post.visual && <div className="slides" style={{ padding: 8 }}>{post.visual.slides.map((s, i) => <SlideArte key={i} slide={s} org={org} i={i} total={post.visual!.slides.length} />)}</div>}
-      <div className="previa-texto">{texto.length > lim ? texto.slice(0, lim) + "…" : texto}</div>
-    </div>
-  );
-}
-
 function Publicacao({ post, org }: { post: Post; org: Organizacao }) {
   const loja = useLoja();
   const conectada = post.pauta.redes.some((r) => org.conexoes[r] === "ativa");
   const baixar = () => {
-    const conteudo = `${post.pauta.tema}\nRedes: ${post.pauta.redes.map(nomeRede).join(", ")}\nData: ${fmtData(post.data)}\n\n${post.texto?.legenda}\n\n${post.texto?.hashtags}\n`;
+    const conteudo = `${post.pauta.tema}\nRedes: ${post.pauta.redes.map(nomeRede).join(", ")}\nData: ${fmtData(post.data)}\nPilar: ${post.pauta.pilar}\nObjetivo: ${nomeObjetivo(post.pauta.objetivo)}\n\n${post.texto?.legenda}\n\n${post.texto?.cta}\n\n${post.texto?.hashtags}\n`;
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([conteudo], { type: "text/plain;charset=utf-8" }));
     a.download = `post-${post.data}.txt`;
@@ -322,23 +324,33 @@ function Publicacao({ post, org }: { post: Post; org: Organizacao }) {
   );
 }
 
-function Editor({ post, aoSalvar }: { post: Post; aoSalvar: () => void }) {
+function Editor({ post, org, aoSalvar }: { post: Post; org: Organizacao; aoSalvar: () => void }) {
+  const alvo = post.etapa === 5 ? 2 : post.etapa; // na aprovação final, edita-se o texto
   const loja = useLoja();
   const [pauta, setPauta] = useState<Pauta>(post.pauta);
-  const [texto, setTexto] = useState<Texto>(post.texto ?? { legenda: "", hashtags: "" });
+  const [texto, setTexto] = useState<Texto>(post.texto ?? { legenda: "", cta: "", hashtags: "" });
   const [visual, setVisual] = useState<Visual>(post.visual ?? { slides: [] });
   const salvar = () => {
-    if (post.etapa === 1) loja.editarManual(post.id, "pauta", pauta);
-    if (post.etapa === 2) loja.editarManual(post.id, "texto", texto);
-    if (post.etapa === 3) loja.editarManual(post.id, "visual", visual);
+    if (alvo === 1) loja.editarManual(post.id, "pauta", pauta);
+    if (alvo === 2) loja.editarManual(post.id, "texto", texto);
+    if (alvo === 3) loja.editarManual(post.id, "visual", visual);
     aoSalvar();
   };
   return (
     <div className="stack">
-      {post.etapa === 1 && (
+      {alvo === 1 && (
         <>
           <label className="campo">Tema<input value={pauta.tema} onChange={(e) => setPauta({ ...pauta, tema: e.target.value })} /></label>
-          <label className="campo">Objetivo<input value={pauta.objetivo} onChange={(e) => setPauta({ ...pauta, objetivo: e.target.value })} /></label>
+          <label className="campo">Pilar de conteúdo
+            <select value={pauta.pilar} onChange={(e) => setPauta({ ...pauta, pilar: e.target.value })}>
+              {[...new Set([pauta.pilar, ...org.kit.pilares])].filter(Boolean).map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </label>
+          <label className="campo">Objetivo
+            <select value={pauta.objetivo} onChange={(e) => setPauta({ ...pauta, objetivo: e.target.value as Objetivo })}>
+              {OBJETIVOS.map((o) => <option key={o.id} value={o.id}>{o.nome} — {o.explica}</option>)}
+            </select>
+          </label>
           <div className="row">
             {REDES.map((r) => (
               <label key={r.id} className="row"><input type="checkbox" checked={pauta.redes.includes(r.id)} onChange={(e) => setPauta({ ...pauta, redes: e.target.checked ? [...pauta.redes, r.id] : pauta.redes.filter((x) => x !== r.id) })} />{r.nome}</label>
@@ -351,19 +363,20 @@ function Editor({ post, aoSalvar }: { post: Post; aoSalvar: () => void }) {
           </label>
         </>
       )}
-      {post.etapa === 2 && (
+      {alvo === 2 && (
         <>
           <label className="campo">Legenda<textarea style={{ minHeight: 180 }} value={texto.legenda} onChange={(e) => setTexto({ ...texto, legenda: e.target.value })} /></label>
+          <label className="campo">Chamada para ação (CTA)<input value={texto.cta} onChange={(e) => setTexto({ ...texto, cta: e.target.value })} placeholder="Ex.: Salve este post para consultar depois." /></label>
           <label className="campo">Hashtags<input value={texto.hashtags} onChange={(e) => setTexto({ ...texto, hashtags: e.target.value })} /></label>
         </>
       )}
-      {post.etapa === 3 && visual.slides.map((s, i) => (
+      {alvo === 3 && visual.slides.map((s, i) => (
         <label key={i} className="campo">Texto da arte {i + 1}
           <input value={s.titulo} onChange={(e) => setVisual({ slides: visual.slides.map((x, j) => (j === i ? { ...x, titulo: e.target.value } : x)) })} />
         </label>
       ))}
       <div className="row">
-        <button className="btn primario" disabled={post.etapa === 1 && (!pauta.tema.trim() || !pauta.redes.length)} onClick={salvar}>Salvar edição</button>
+        <button className="btn primario" disabled={alvo === 1 && (!pauta.tema.trim() || !pauta.redes.length)} onClick={salvar}>Salvar edição</button>
         <button className="btn" onClick={aoSalvar}>Cancelar</button>
       </div>
     </div>

@@ -1,15 +1,21 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
-import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { AlertTriangle, ChevronLeft, ChevronRight, Sparkles, X } from "lucide-react";
+import { PlanoSemanal } from "@/components/PlanoSemanal";
 import { useLoja, usePostsDaOrg } from "@/mock/loja";
 import { ESTADOS, estadoDoPost, faltasDeCadencia, hoje, nomeRede } from "@/mock/regras";
 import { PageHeader } from "@/components/ui";
 
 const DIAS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 
-export default function Calendario() {
-  const { org } = useLoja();
+function Mes() {
+  const { org, criarPlano } = useLoja();
+  const params = useSearchParams();
+  const [planejando, setPlanejando] = useState(false);
+  const [criados, setCriados] = useState(0);
+  useEffect(() => { if (params.get("planejar")) setPlanejando(true); }, [params]);
   const posts = usePostsDaOrg();
   const [ref, setRef] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   if (!org) return null;
@@ -31,10 +37,16 @@ export default function Calendario() {
             <button className="btn peq" onClick={() => mover(-1)} aria-label="Mês anterior"><ChevronLeft size={16} /></button>
             <b style={{ minWidth: 140, textAlign: "center" }}>{ref.toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}</b>
             <button className="btn peq" onClick={() => mover(1)} aria-label="Próximo mês"><ChevronRight size={16} /></button>
-            <Link href="/posts?novo=1" className="btn primario">Novo post</Link>
+            <button className="btn primario" onClick={() => { setCriados(0); setPlanejando(true); }}><Sparkles size={16} aria-hidden /> Planejar semana com o agente</button>
+            <Link href="/posts?novo=1" className="btn">Novo post</Link>
           </>
         }
       />
+      {criados > 0 && (
+        <div className="alerta t-success" style={{ marginBottom: 12 }} role="status">
+          <span>Plano aprovado: {criados} {criados === 1 ? "post criado" : "posts criados"}. {org.pilotoAutomatico ? "O agente está produzindo um por vez; eles chegam em " : "Eles esperam você em "}<Link href={org.pilotoAutomatico ? "/aprovacoes" : "/posts"}>{org.pilotoAutomatico ? "Aprovações" : "Posts"}</Link>.</span>
+        </div>
+      )}
       {faltas.length > 0 && (
         <div className="alerta t-warning" style={{ marginBottom: 12 }}>
           <AlertTriangle size={16} aria-hidden />
@@ -53,7 +65,7 @@ export default function Calendario() {
                 {doDia.map((p) => {
                   const e = ESTADOS[estadoDoPost(p, org)];
                   return (
-                    <Link key={p.id} href={`/posts/${p.id}`} className={`cal-post t-${e.tom}`} title={`${p.pauta.tema} — ${e.rotulo}`}>
+                    <Link key={p.id} href={`/posts/${p.id}`} className={`cal-post t-${e.tom}`} title={`${p.pauta.tema} — ${e.rotulo} — pilar: ${p.pauta.pilar || "sem pilar"}`}>
                       {e.rotulo}: {p.pauta.tema}
                     </Link>
                   );
@@ -63,6 +75,27 @@ export default function Calendario() {
           })}
         </div>
       </div>
+
+      {planejando && (
+        <div className="drawer-fundo" onClick={() => setPlanejando(false)}>
+          <aside className="drawer stack" role="dialog" aria-label="Plano semanal" onClick={(e) => e.stopPropagation()}>
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <h2 style={{ margin: 0 }}>Plano semanal</h2>
+              <button className="btn peq" onClick={() => setPlanejando(false)} aria-label="Fechar"><X size={16} /></button>
+            </div>
+            <p className="muted" style={{ margin: 0 }}>O agente propõe os posts que faltam para cumprir a cadência, distribuindo os pilares da {org.nome}.</p>
+            <PlanoSemanal org={org} posts={posts} aoAprovar={(itens) => { setCriados(criarPlano(itens)); setPlanejando(false); }} />
+          </aside>
+        </div>
+      )}
     </>
+  );
+}
+
+export default function Calendario() {
+  return (
+    <Suspense>
+      <Mes />
+    </Suspense>
   );
 }

@@ -2,13 +2,14 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { Bell, Calendar, Coins, FileText, Home, LogOut, Palette, Plug, Settings } from "lucide-react";
+import { Bell, Calendar, CheckCheck, Coins, FileText, Home, LogOut, Palette, Plug, Plus, Settings } from "lucide-react";
 import { useLoja } from "@/mock/loja";
 import { estadoDoPost } from "@/mock/regras";
 
 const MENU = [
   { grupo: "Trabalho", itens: [
     { href: "/inicio", nome: "Início", icone: Home },
+    { href: "/aprovacoes", nome: "Aprovações", icone: CheckCheck },
     { href: "/posts", nome: "Posts", icone: FileText },
     { href: "/calendario", nome: "Calendário", icone: Calendar },
   ] },
@@ -32,6 +33,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   if (!pronto || !sessao || !dados || !org) return <div className="vazio">Carregando…</div>;
 
   const pendentes = dados.posts.filter((p) => p.orgId === org.id && ["aguardando_aprovacao", "atrasado"].includes(estadoDoPost(p, org))).length;
+  const naFila = dados.posts.filter((p) => p.orgId === org.id && p.etapa === 5 && !p.descartado).length;
 
   return (
     <div className="shell">
@@ -45,6 +47,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             {g.itens.map(({ href, nome, icone: I }) => (
               <Link key={href} href={href} className={`nav-item ${rota.startsWith(href) ? "ativo" : ""}`}>
                 <I size={18} aria-hidden /> {nome}
+                {href === "/aprovacoes" && naFila > 0 && <span className="badge t-ai num" style={{ marginLeft: "auto" }}>{naFila}</span>}
               </Link>
             ))}
           </div>
@@ -61,9 +64,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
               ))}
             </select>
           </label>
+          <Link href="/onboarding" className="btn peq"><Plus size={14} aria-hidden /> Nova marca</Link>
           <span className="espaco" />
           <span className="mock-aviso">Dados de exemplo</span>
-          <Link href="/inicio" className="btn peq" title="Itens que precisam de você" aria-label={`${pendentes} itens aguardando você`}>
+          <Link href={naFila > 0 ? "/aprovacoes" : "/inicio"} className="btn peq" title="Itens que precisam de você" aria-label={`${pendentes} itens aguardando você`}>
             <Bell size={16} aria-hidden /> <span className="num">{pendentes}</span>
           </Link>
           <span className="small muted">{sessao.email}</span>
