@@ -68,7 +68,8 @@ O plano do primeiro mês, que fecha o onboarding, só passa a existir na etapa 6
 ## Etapa 3 — Pauta e texto, com intervenção humana
 **Constrói:** o começo do fluxo de criação (etapas 1 e 2 do fluxo: pauta e texto), com os quatro comandos em cada passo: aprovar, pedir ajuste, editar à mão, descartar. O registro de tokens e custo nasce junto, mesmo sem tela ainda.
 Cada post nasce com pilar, objetivo e CTA. O agente avança sozinho pelas etapas (piloto automático) e você intervém quando quiser.
-**Requisitos:** POST-01, POST-02, POST-03, POST-04, POST-07, POST-08, POST-09, AGT-01, AGT-03, CST-01.
+É aqui que a IA de verdade entra: a etapa inclui o cadastro das APIs de IA (chave, endpoint e modelo) e a escolha da API de cada etapa.
+**Requisitos:** POST-01, POST-02, POST-03, POST-04, POST-07, POST-08, POST-09, AGT-01, AGT-03, AGT-07, AGT-08, CST-01.
 
 Pronto quando:
 - [ ] Você pede um post ou aceita uma sugestão de pauta.
@@ -76,6 +77,8 @@ Pronto quando:
 - [ ] Você pede um ajuste com um comentário e recebe nova versão.
 - [ ] As versões anteriores ficam guardadas.
 - [ ] Cada tarefa do agente grava tokens e custo em dólar.
+- [ ] Você cadastra uma API de IA em Configurações e a chave não aparece inteira depois de salva.
+- [ ] Você escolhe APIs diferentes para pauta e texto, e o registro de custo mostra qual foi usada.
 - [ ] Cada post mostra seu pilar, seu objetivo (atrair, engajar ou converter) e seu CTA.
 - [ ] O agente passa da pauta ao texto sem esperar por você, e você consegue intervir no meio.
 

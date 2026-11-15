@@ -1,4 +1,4 @@
-import type { EstadoPost, Etapa, Formato, Objetivo, Organizacao, Post, Rede } from "./types";
+import type { Dados, EstadoPost, Etapa, EtapaIA, Formato, Objetivo, Organizacao, Post, Rede } from "./types";
 
 export const ETAPAS: { n: Etapa; nome: string }[] = [
   { n: 1, nome: "Pauta" },
@@ -8,6 +8,20 @@ export const ETAPAS: { n: Etapa; nome: string }[] = [
   { n: 5, nome: "Aprovação final" },
   { n: 6, nome: "Publicação" },
 ];
+
+/** Pontos do processo que podem ter uma API de IA própria (AGT-08). */
+export const ETAPAS_IA: { id: EtapaIA; nome: string; agente: string; tipo: "texto" | "imagem" }[] = [
+  { id: "planejamento", nome: "Onboarding e plano semanal", agente: "Strategy Agent", tipo: "texto" },
+  { id: "1", nome: "1. Pauta", agente: "Strategy Agent", tipo: "texto" },
+  { id: "2", nome: "2. Texto", agente: "Creative Agent", tipo: "texto" },
+  { id: "3", nome: "3. Visual", agente: "Creative Agent", tipo: "imagem" },
+  { id: "4", nome: "4. Revisão", agente: "Social Agent", tipo: "texto" },
+];
+/** Nome do fornecedor configurado para a etapa, ou undefined se nenhuma API foi escolhida. */
+export function fornecedorDaEtapa(d: Dados, etapa: EtapaIA): string | undefined {
+  const api = d.apis.find((a) => a.id === d.apiPorEtapa[etapa]);
+  return api ? `${api.nome}${api.modelo ? ` · ${api.modelo}` : ""}` : undefined;
+}
 
 export const REDES: { id: Rede; nome: string; limite: number; tamanho: string }[] = [
   { id: "instagram", nome: "Instagram", limite: 2200, tamanho: "1080×1350" },

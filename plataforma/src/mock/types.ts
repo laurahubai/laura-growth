@@ -116,8 +116,23 @@ export interface RegistroCusto {
   em: string;
 }
 
+/** Conexão com um fornecedor de IA (AGT-07). Vale para a plataforma inteira (Operação Laura). */
+export interface ApiIA {
+  id: string;
+  nome: string;
+  tipo: "texto" | "imagem";
+  endpoint: string;
+  modelo: string;
+  /** Só os 4 últimos caracteres. O protótipo nunca guarda a chave inteira. */
+  chaveFinal: string;
+}
+/** Pontos do processo que podem usar uma API própria (AGT-08). */
+export type EtapaIA = "planejamento" | "1" | "2" | "3" | "4";
+
 export interface Dados {
   versao: number;
+  apis: ApiIA[];
+  apiPorEtapa: Partial<Record<EtapaIA, string>>; // id da ApiIA
   orgs: Organizacao[];
   posts: Post[];
   custos: RegistroCusto[];

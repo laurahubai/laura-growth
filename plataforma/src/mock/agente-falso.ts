@@ -155,9 +155,9 @@ export function passosAoVivo(etapa: Etapa, ajuste: boolean): { agente: Agente; p
 }
 
 /** Consumo fictício por tarefa (fornecedor e preços: a definir). */
-export function consumoFicticio(etapa: Etapa, slides = 1) {
+export function consumoFicticio(etapa: Etapa, slides = 1, fornecedor?: string) {
   if (etapa === 3)
-    return { fornecedor: "Fornecedor de imagem (exemplo)", unidade: "imagem" as const, quantidade: slides, preco: 0.04 };
+    return { fornecedor: fornecedor ?? "Fornecedor de imagem (exemplo)", unidade: "imagem" as const, quantidade: slides, preco: 0.04 };
   const tokens = 900 + Math.round(Math.random() * 1600);
-  return { fornecedor: "Fornecedor de texto (exemplo)", unidade: "tokens" as const, quantidade: tokens, preco: 0.000009 };
+  return { fornecedor: fornecedor ?? "Fornecedor de texto (exemplo)", unidade: "tokens" as const, quantidade: tokens, preco: 0.000009 };
 }

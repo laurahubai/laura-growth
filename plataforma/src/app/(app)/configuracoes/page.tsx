@@ -4,6 +4,7 @@ import { useLoja } from "@/mock/loja";
 import { REDES } from "@/mock/regras";
 import type { Rede } from "@/mock/types";
 import { PageHeader } from "@/components/ui";
+import { ApisDeIA } from "@/components/ApisDeIA";
 
 export default function Configuracoes() {
   const { org, salvarCadencia, salvarPiloto, restaurarExemplo } = useLoja();
@@ -46,6 +47,9 @@ export default function Configuracoes() {
             Restaurar dados de exemplo
           </button>
         </section>
+      </div>
+      <div className="stack" style={{ marginTop: 16 }}>
+        <ApisDeIA />
       </div>
     </>
   );

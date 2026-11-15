@@ -2,7 +2,7 @@
 import type { Dados, Etapa, Organizacao, Post, RegistroCusto } from "./types";
 import { gerarTexto, gerarVisual } from "./agente-falso";
 
-export const VERSAO_DADOS = 2;
+export const VERSAO_DADOS = 3;
 
 const dia = (delta: number) => {
   const d = new Date();
@@ -121,6 +121,8 @@ export function dadosDeExemplo(): Dados {
   ];
   return {
     versao: VERSAO_DADOS,
+    apis: [], // fornecedores de IA: a definir; cadastre em Configurações
+    apiPorEtapa: {},
     orgs: [lg, lh],
     posts,
     custos: posts.flatMap(custosDe),

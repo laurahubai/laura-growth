@@ -1,7 +1,8 @@
 "use client";
 // Camada única de dados do mock. Para ligar o backend, trocar as ações abaixo por chamadas à API.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { Dados, Etapa, KitMarca, Organizacao, Pauta, Post, Rede, Texto, Versao, Visual } from "./types";
+import type { ApiIA, Dados, Etapa, EtapaIA, KitMarca, Organizacao, Pauta, Post, Rede, Texto, Versao, Visual } from "./types";
+import { fornecedorDaEtapa } from "./regras";
 import { dadosDeExemplo, VERSAO_DADOS } from "./exemplo";
 import { consumoFicticio, gerarTexto, gerarVisual, passosAoVivo, revisar, sugerirPauta, type ItemDoPlano } from "./agente-falso";
 
@@ -54,6 +55,11 @@ function useLojaInterna() {
     if (pronto) gravar(CHAVE_SESSAO, sessao);
   }, [sessao, pronto]);
 
+  // Organização da sessão sumiu (ex.: dados restaurados): a sessão volta para a primeira organização.
+  useEffect(() => {
+    if (dados && sessao && !dados.orgs.some((o) => o.id === sessao.orgId)) setSessao({ ...sessao, orgId: dados.orgs[0].id });
+  }, [dados, sessao]);
+
   const quem = sessao?.email ?? "Você";
 
   const mudarPost = useCallback((id: string, f: (p: Post) => Post) => {
@@ -88,7 +94,7 @@ function useLojaInterna() {
         anterior = post.revisao;
         novo.revisao = revisar(org, post);
       }
-      const c = consumoFicticio(etapa, post.pauta.formato === "carrossel" ? 4 : 1);
+      const c = consumoFicticio(etapa, post.pauta.formato === "carrossel" ? 4 : 1, fornecedorDaEtapa(d, String(etapa) as EtapaIA));
       setDados((dd) =>
         dd
           ? {
@@ -211,7 +217,7 @@ function useLojaInterna() {
         trabalhando: false,
       }));
       const custosPlano = novos.map((p) => {
-        const c = consumoFicticio(1);
+        const c = consumoFicticio(1, 1, ref.current ? fornecedorDaEtapa(ref.current, "planejamento") : undefined);
         return { id: novoId("custo"), orgId: alvo, postId: p.id, agente: "Strategy Agent" as const, etapa: 1 as Etapa, fornecedor: c.fornecedor, unidade: c.unidade, quantidade: c.quantidade, precoUnitarioUsd: c.preco, custoUsd: c.quantidade * c.preco, em: agora() };
       });
       setDados((d) => (d ? { ...d, posts: [...novos, ...d.posts], custos: [...d.custos, ...custosPlano] } : d));
@@ -280,10 +286,33 @@ function useLojaInterna() {
       })),
     tentarDeNovo: (postId: string) =>
       mudarPost(postId, (x) => ({ ...x, publicacao: undefined, historico: [...x.historico, evento("Pediu nova tentativa de publicação")] })),
+    /** Cadastra ou altera uma API de IA (AGT-07). Recebe só o final da chave; a chave inteira nunca é guardada. */
+    salvarApi: (api: ApiIA) =>
+      setDados((d) => (d ? { ...d, apis: d.apis.some((a) => a.id === api.id) ? d.apis.map((a) => (a.id === api.id ? api : a)) : [...d.apis, api] } : d)),
+    removerApi: (id: string) =>
+      setDados((d) =>
+        d
+          ? {
+              ...d,
+              apis: d.apis.filter((a) => a.id !== id),
+              apiPorEtapa: Object.fromEntries(Object.entries(d.apiPorEtapa).filter(([, v]) => v !== id)),
+            }
+          : d,
+      ),
+    /** Escolhe a API usada em uma etapa (AGT-08). Sem id, a etapa volta a "não definida". */
+    definirApiDaEtapa: (etapa: EtapaIA, apiId: string) =>
+      setDados((d) => {
+        if (!d) return d;
+        const mapa = { ...d.apiPorEtapa };
+        if (apiId) mapa[etapa] = apiId;
+        else delete mapa[etapa];
+        return { ...d, apiPorEtapa: mapa };
+      }),
     restaurarExemplo: () => setDados(dadosDeExemplo()),
   };
 
-  const org = dados?.orgs.find((o) => o.id === sessao?.orgId) ?? null;
+  // Se a organização da sessão não existe mais (ex.: dados restaurados), cai na primeira.
+  const org = (sessao && dados ? dados.orgs.find((o) => o.id === sessao.orgId) ?? dados.orgs[0] : null) ?? null;
   return { pronto, dados, sessao, org, ...acoes };
 }
 
