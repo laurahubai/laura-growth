@@ -29,7 +29,7 @@ Parte do [[PRD - Plataforma Laura Growth]]. Cobre a [[PRD - Fase 1 - MVP de Post
 | Nova marca | Onboarding em 4 passos: sobre a marca, revisar o kit rascunhado pelo agente, cadência, plano da primeira semana | MKT-05, CAL-04 |
 | Conexões | Estado das redes (no mock: todas "não conectadas", entrega manual) | CNX-02, CNX-06 |
 | Custos | Visão Operação: tokens e dólares, custo médio, exportar planilha | CST-01..07 |
-| Configurações | Cadência por rede, piloto automático (liga e desliga), cadastro das APIs de IA, API usada em cada etapa e restaurar dados | CAL-02, POST-09, AGT-07, AGT-08 |
+| Configurações | Cadência por rede, piloto automático (liga e desliga), cadastro das APIs de IA, API usada em cada etapa (principal e fallback) e restaurar dados | CAL-02, POST-09, AGT-07, AGT-08, AGT-09 |
 
 Seletor de organização e botão "Nova marca" na barra superior (ORG-03).
 
@@ -84,6 +84,7 @@ Cobre as sete sugestões aprovadas em [[Processo de Posicionamento Digital - An�
 - [ ] Em "Aprovações", aprovo ou devolvo um post após o outro na mesma tela.
 - [ ] Em Configurações, cadastro uma API de IA (com chave fictícia) e vejo a chave mascarada.
 - [ ] Escolho uma API para uma etapa, crio um post e vejo essa API no painel de Custos.
+- [ ] Escolho um fallback diferente da principal para uma etapa; sem principal, o fallback fica bloqueado.
 
 **Limites do protótipo:** nenhuma API de IA é chamada de verdade e a chave digitada é descartada ao salvar (ficam só os 4 últimos caracteres; não usar chaves reais); o agente não lê site nem perfis de verdade (o rascunho do kit é um exemplo); o plano é semanal, não mensal; temas e textos são modelos fixos.
 

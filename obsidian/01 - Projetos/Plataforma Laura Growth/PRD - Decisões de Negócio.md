@@ -50,7 +50,7 @@ Parte do [[PRD - Plataforma Laura Growth]]. Decisões tomadas na jornada de perg
 | Divisão em fases | Aprovada, incluindo 1A (imagem e carrossel) e 1B (vídeo e TikTok) |
 | Cor da marca na plataforma | Coral própria (diferente do azul da Laura Hub), com botões principais em grafite (decidido em 2026-11-15; ver [[Benchmark - Cor de Marca]]) |
 | Tecnologias | Mesmas da Laura Hub (Next.js, Go, PostgreSQL, River, ponte Python); tela atualizada ao vivo durante o trabalho da IA (decidido em 2026-11-15; mecanismo SSE a confirmar — ver [[Tecnologias de Base]]) |
-| APIs de IA | Cadastro de chave, endpoint e modelo em Configurações, com possibilidade de uma API diferente para cada etapa do processo (decidido em 2026-11-15; fornecedores ainda a definir; ver [[PRD - Agentes de IA]]) |
+| APIs de IA | Cadastro de chave, endpoint e modelo em Configurações, com possibilidade de uma API diferente para cada etapa do processo e uma API de fallback (reserva) por etapa (decidido em 2026-11-15; fornecedores ainda a definir; ver [[PRD - Agentes de IA]]) |
 | Fonte da plataforma | Inter (decidido em 2026-11-15; ver [[Design System - Plataforma Laura Growth]]) |
 
 ## MVP de posts

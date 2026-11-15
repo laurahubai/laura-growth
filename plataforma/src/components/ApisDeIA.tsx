@@ -9,10 +9,10 @@ import type { ApiIA } from "@/mock/types";
 const VAZIA = { id: "", nome: "", tipo: "texto" as ApiIA["tipo"], endpoint: "", modelo: "", chave: "" };
 
 export function ApisDeIA() {
-  const { dados, salvarApi, removerApi, definirApiDaEtapa } = useLoja();
+  const { dados, salvarApi, removerApi, definirApiDaEtapa, definirFallbackDaEtapa } = useLoja();
   const [form, setForm] = useState<typeof VAZIA | null>(null);
   if (!dados) return null;
-  const { apis, apiPorEtapa } = dados;
+  const { apis, apiPorEtapa, fallbackPorEtapa } = dados;
 
   const existente = form ? apis.find((a) => a.id === form.id) : undefined;
   const invalido = !form || !form.nome.trim() || !form.endpoint.trim() || (!existente && form.chave.trim().length < 4);
@@ -30,6 +30,7 @@ export function ApisDeIA() {
     setForm(null);
   };
   const semApi = ETAPAS_IA.filter((e) => !apis.some((a) => a.id === apiPorEtapa[e.id]));
+  const semFallback = ETAPAS_IA.filter((e) => !semApi.includes(e) && !apis.some((a) => a.id === fallbackPorEtapa[e.id]));
 
   return (
     <>
@@ -101,18 +102,32 @@ export function ApisDeIA() {
 
       <section className="card stack">
         <h2 style={{ margin: 0 }}>API usada em cada etapa</h2>
-        <p className="muted" style={{ margin: 0 }}>Cada etapa do processo pode usar uma API diferente. A mesma API pode servir a várias etapas.</p>
+        <p className="muted" style={{ margin: 0 }}>Cada etapa do processo pode usar uma API diferente. A mesma API pode servir a várias etapas. O <b>fallback</b> é a API reserva: entra no lugar da principal quando ela falha (fora do ar, limite de uso atingido ou erro).</p>
         {ETAPAS_IA.map((e) => {
           const opcoes = apis.filter((a) => a.tipo === e.tipo);
           const atual = apis.some((a) => a.id === apiPorEtapa[e.id]) ? apiPorEtapa[e.id]! : "";
+          const opcoesReserva = opcoes.filter((a) => a.id !== atual);
+          const reserva = opcoesReserva.some((a) => a.id === fallbackPorEtapa[e.id]) ? fallbackPorEtapa[e.id]! : "";
           return (
-            <label key={e.id} className="campo">
-              <span>{e.nome} <span className="small muted" style={{ fontWeight: 400 }}>· {e.agente} · usa API de {e.tipo}</span></span>
-              <select value={atual} onChange={(ev) => definirApiDaEtapa(e.id, ev.target.value)}>
-                <option value="">{opcoes.length ? "Não definida" : `Cadastre uma API de ${e.tipo}`}</option>
-                {opcoes.map((a) => <option key={a.id} value={a.id}>{a.nome}{a.modelo ? ` · ${a.modelo}` : ""}</option>)}
-              </select>
-            </label>
+            <fieldset key={e.id} className="stack" style={{ border: 0, padding: 0, margin: 0, gap: 6 }}>
+              <legend style={{ fontWeight: 600, padding: 0, marginBottom: 6 }}>{e.nome} <span className="small muted" style={{ fontWeight: 400 }}>· {e.agente} · usa API de {e.tipo}</span></legend>
+              <div className="grid g2">
+                <label className="campo">
+                  <span className="small">Principal</span>
+                  <select value={atual} onChange={(ev) => definirApiDaEtapa(e.id, ev.target.value)}>
+                    <option value="">{opcoes.length ? "Não definida" : `Cadastre uma API de ${e.tipo}`}</option>
+                    {opcoes.map((a) => <option key={a.id} value={a.id}>{a.nome}{a.modelo ? ` · ${a.modelo}` : ""}</option>)}
+                  </select>
+                </label>
+                <label className="campo">
+                  <span className="small">Fallback (reserva)</span>
+                  <select value={reserva} disabled={!atual} onChange={(ev) => definirFallbackDaEtapa(e.id, ev.target.value)}>
+                    <option value="">{!atual ? "Escolha a principal primeiro" : opcoesReserva.length ? "Sem fallback" : `Cadastre outra API de ${e.tipo}`}</option>
+                    {opcoesReserva.map((a) => <option key={a.id} value={a.id}>{a.nome}{a.modelo ? ` · ${a.modelo}` : ""}</option>)}
+                  </select>
+                </label>
+              </div>
+            </fieldset>
           );
         })}
         {semApi.length > 0 ? (
@@ -120,7 +135,10 @@ export function ApisDeIA() {
         ) : (
           <div className="alerta t-success">Todas as etapas têm uma API definida.</div>
         )}
-        <p className="small muted">A escolha vale para as próximas tarefas dos agentes e aparece no painel de Custos.</p>
+        {semFallback.length > 0 && (
+          <div className="alerta t-neutral">Sem fallback: {semFallback.map((e) => e.nome).join(" · ")}. Se a API principal falhar, a etapa para e o agente avisa.</div>
+        )}
+        <p className="small muted">A escolha vale para as próximas tarefas dos agentes e aparece no painel de Custos. No protótipo nenhuma API é chamada de verdade, então o fallback nunca é acionado; ele só fica registrado.</p>
       </section>
     </>
   );

@@ -123,6 +123,7 @@ export function dadosDeExemplo(): Dados {
     versao: VERSAO_DADOS,
     apis: [], // fornecedores de IA: a definir; cadastre em Configurações
     apiPorEtapa: {},
+    fallbackPorEtapa: {},
     orgs: [lg, lh],
     posts,
     custos: posts.flatMap(custosDe),

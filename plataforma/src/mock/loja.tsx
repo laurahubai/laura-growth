@@ -44,7 +44,8 @@ function useLojaInterna() {
 
   useEffect(() => {
     const d = ler<Dados>(CHAVE);
-    setDados(d && d.versao === VERSAO_DADOS ? { ...d, posts: d.posts.map((p) => ({ ...p, trabalhando: false })) } : dadosDeExemplo());
+    // fallbackPorEtapa veio depois: dados salvos antes dele ganham o campo vazio (sem perder as APIs já cadastradas).
+    setDados(d && d.versao === VERSAO_DADOS ? { ...d, fallbackPorEtapa: d.fallbackPorEtapa ?? {}, posts: d.posts.map((p) => ({ ...p, trabalhando: false })) } : dadosDeExemplo());
     setSessao(ler<Sessao>(CHAVE_SESSAO));
     setPronto(true);
   }, []);
@@ -296,17 +297,29 @@ function useLojaInterna() {
               ...d,
               apis: d.apis.filter((a) => a.id !== id),
               apiPorEtapa: Object.fromEntries(Object.entries(d.apiPorEtapa).filter(([, v]) => v !== id)),
+              fallbackPorEtapa: Object.fromEntries(Object.entries(d.fallbackPorEtapa).filter(([, v]) => v !== id)),
             }
           : d,
       ),
-    /** Escolhe a API usada em uma etapa (AGT-08). Sem id, a etapa volta a "não definida". */
+    /** Escolhe a API principal de uma etapa (AGT-08). Sem id, a etapa volta a "não definida" e perde o fallback. */
     definirApiDaEtapa: (etapa: EtapaIA, apiId: string) =>
       setDados((d) => {
         if (!d) return d;
         const mapa = { ...d.apiPorEtapa };
+        const reserva = { ...d.fallbackPorEtapa };
         if (apiId) mapa[etapa] = apiId;
         else delete mapa[etapa];
-        return { ...d, apiPorEtapa: mapa };
+        if (!apiId || reserva[etapa] === apiId) delete reserva[etapa]; // fallback não pode ser a própria principal
+        return { ...d, apiPorEtapa: mapa, fallbackPorEtapa: reserva };
+      }),
+    /** Escolhe a API de fallback (reserva) de uma etapa (AGT-09): usada quando a principal falha. */
+    definirFallbackDaEtapa: (etapa: EtapaIA, apiId: string) =>
+      setDados((d) => {
+        if (!d) return d;
+        const reserva = { ...d.fallbackPorEtapa };
+        if (apiId && apiId !== d.apiPorEtapa[etapa]) reserva[etapa] = apiId;
+        else delete reserva[etapa];
+        return { ...d, fallbackPorEtapa: reserva };
       }),
     restaurarExemplo: () => setDados(dadosDeExemplo()),
   };

@@ -34,6 +34,7 @@ Ficha existente: [[Strategy Agent]]. As demais fichas ainda precisam ser criadas
 | AGT-06 | Quando não conseguir concluir uma tarefa, avisar em vez de entregar algo incompleto. |
 | AGT-07 | Cadastrar, em Configurações, as **APIs de IA** da plataforma: nome, tipo (texto ou imagem), endpoint (endereço da API), modelo e chave de API. A chave fica cifrada no servidor e nunca é exibida inteira. Vale para a plataforma toda (Operação Laura), não por organização. |
 | AGT-08 | Escolher **qual API cada etapa usa**: onboarding e plano semanal, pauta, texto, visual e revisão. A mesma API pode servir a várias etapas. O registro de custo guarda a API usada (AGT-04). |
+| AGT-09 | Escolher, para cada etapa, uma **API de fallback** (reserva), do mesmo tipo e diferente da principal. Ela entra no lugar da principal quando esta falha (fora do ar, limite de uso ou erro). Sem fallback, a etapa para e o agente avisa (AGT-06). O registro de custo guarda a API que de fato atendeu. |
 
 ## A definir
 - Quais fornecedores de IA serão usados para texto, imagem e vídeo. A plataforma já prevê uma API por etapa (AGT-07 e AGT-08, decidido em 2026-11-15); falta escolher os fornecedores.

@@ -133,6 +133,8 @@ export interface Dados {
   versao: number;
   apis: ApiIA[];
   apiPorEtapa: Partial<Record<EtapaIA, string>>; // id da ApiIA
+  /** API reserva de cada etapa, usada quando a principal falha (AGT-09). */
+  fallbackPorEtapa: Partial<Record<EtapaIA, string>>;
   orgs: Organizacao[];
   posts: Post[];
   custos: RegistroCusto[];
