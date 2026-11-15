@@ -1,0 +1,20 @@
+# Dependências e builds
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Segredos
+.env*
+!.env.example
+
+# Arquivos locais/pessoais
+CLAUDE.local.md
+.claude/settings.local.json
+.DS_Store
+
+# Estado local do Obsidian
+obsidian/.obsidian/workspace*.json
+obsidian/.trash/

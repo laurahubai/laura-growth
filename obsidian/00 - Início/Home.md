@@ -1,0 +1,38 @@
+---
+tipo: painel
+status: aprovado
+criado: 2026-11-14
+---
+# Laura Growth — Home
+
+> Seu time de marketing com IA. *(Documentação conceitual — nada aqui é funcionalidade verificada.)*
+
+Comece por aqui. Cada item abaixo é um clique.
+
+## 🚀 Projetos (têm prazo e entrega)
+- [[Índice - Projetos]]
+- [[00 - Visão do Projeto]] — Lançamento da Laura Growth
+- [[Checklist de Validação Pré-Lançamento]]
+- [[Registro de Decisões]]
+- [[PRD - Plataforma Laura Growth]] — PRD da plataforma
+  - Construção: [[Roteiro de Construção - Fase 1A]] · [[Design System - Plataforma Laura Growth]] · [[Benchmark - Cor de Marca]] · [[Tecnologias de Base]] · [[Especificação - Frontend Mockado]]
+  - Comece por: [[PRD - Fases e Escopo]] · [[PRD - Fase 1 - MVP de Posts]] · [[PRD - Decisões de Negócio]]
+  - Demais partes: [[PRD - Público e Perfis]] · [[PRD - Modelo de Organizações]] · [[PRD - Agentes de IA]] · [[PRD - Painel de Custos e Créditos]] · [[PRD - Permissões e Aprovações]] · [[PRD - Conexões com Plataformas]] · [[PRD - Conformidade e Regras do Setor]] · [[PRD - Indicadores de Sucesso]] · [[PRD - Riscos e Pontos a Definir]]
+
+## 🧭 Áreas (responsabilidades contínuas)
+- [[Índice - Áreas]]
+- Marca: [[Laura Growth - Posicionamento]] · [[Comunicação Internacional]]
+- Produto: [[Agentes de IA - Visão Geral]] · [[Strategy Agent]]
+- Comercial: [[Modelo Comercial]]
+- Jurídico: [[LGPD e GDPR]]
+- Ecossistema: [[Laura Hub x Laura Growth]]
+
+## 📚 Recursos (consulta)
+- [[Glossário]]
+- [[Benchmark - Crush AI]] — fluxo e telas de um concorrente (anúncios com IA)
+- [[laura-growth (original)]]
+
+## 🗄️ Arquivo e Sistema
+- [[Índice - Arquivo]]
+- [[Como usar este cofre]]
+- Modelos: [[Template - Projeto]] · [[Template - Decisão]] · [[Template - Reunião]] · [[Template - Agente]]
