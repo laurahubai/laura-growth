@@ -2,11 +2,14 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { Home, LogOut } from "lucide-react";
+import { Home, LogOut, Palette } from "lucide-react";
 import { FalhaApi, useSair, useSessao, useTrocarOrganizacao } from "@/lib/api";
 
 // Itens entram no menu conforme as etapas do roteiro ficam prontas.
-const MENU = [{ grupo: "Trabalho", itens: [{ href: "/inicio", nome: "Início", icone: Home }] }];
+const MENU = [
+  { grupo: "Trabalho", itens: [{ href: "/inicio", nome: "Início", icone: Home }] },
+  { grupo: "Organização", itens: [{ href: "/kit", nome: "Kit de marca", icone: Palette }] },
+];
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const sessao = useSessao();

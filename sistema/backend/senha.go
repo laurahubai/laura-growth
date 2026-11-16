@@ -43,10 +43,10 @@ func senhaConfere(hash, senha string) bool {
 // limitador barra tentativas de login repetidas para o mesmo e-mail:
 // depois de maxFalhas erros dentro da janela, recusa até a janela passar.
 type limitador struct {
-	mu       sync.Mutex
-	falhas   map[string][]time.Time
+	mu        sync.Mutex
+	falhas    map[string][]time.Time
 	maxFalhas int
-	janela   time.Duration
+	janela    time.Duration
 }
 
 func novoLimitador() *limitador {

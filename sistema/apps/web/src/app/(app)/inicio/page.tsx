@@ -30,7 +30,7 @@ export default function Inicio() {
         )}
       </section>
       <p className="small muted" style={{ marginTop: 16 }}>
-        Etapa 1 da construção: acesso e organizações. O kit de marca chega na etapa 2.
+        Em construção: acesso, organizações e kit de marca prontos. Criação de posts chega na etapa 3.
       </p>
     </>
   );

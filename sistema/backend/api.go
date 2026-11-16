@@ -69,6 +69,7 @@ func (a *API) Rotas() http.Handler {
 	m.HandleFunc("DELETE /api/sessao", a.comSessao(a.sair))
 	m.HandleFunc("PUT /api/sessao/organizacao", a.comSessao(a.trocarOrganizacao))
 	m.HandleFunc("GET /api/organizacao", a.comSessao(a.verOrganizacao))
+	a.rotasKit(m)
 	return protegerOrigem(m)
 }
 

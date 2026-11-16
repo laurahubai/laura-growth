@@ -46,3 +46,36 @@ export const nomeTipoOrganizacao: Record<TipoOrganizacao, string> = {
   empresa: "Empresa",
   clinica_estetica: "Clínica de estética",
 };
+
+// ---- Etapa 2: kit de marca ----
+
+export const LIMITES_KIT = { pilaresMin: 3, pilaresMax: 5, coresMax: 5, textoMax: 5000, pilarMax: 80, arquivoMaxMB: 8 } as const;
+
+export const KitMarca = z.object({
+  organizacaoId: z.string(),
+  site: z.string(),
+  perfis: z.string(),
+  tomDeVoz: z.string(),
+  publico: z.string(),
+  temas: z.string(),
+  nuncaDizer: z.string(),
+  fontes: z.string(),
+  exemplos: z.string(),
+  pilares: z.array(z.string()),
+  cores: z.array(z.string()),
+  atualizadoEm: z.string().nullable(),
+});
+export type KitMarca = z.infer<typeof KitMarca>;
+
+export const ArquivoMarca = z.object({
+  id: z.string(),
+  tipo: z.enum(["logo", "referencia"]),
+  nome: z.string(),
+  mime: z.string(),
+  tamanho: z.number(),
+  criadoEm: z.string(),
+});
+export type ArquivoMarca = z.infer<typeof ArquivoMarca>;
+
+export const RespostaKit = z.object({ kit: KitMarca, arquivos: z.array(ArquivoMarca) });
+export type RespostaKit = z.infer<typeof RespostaKit>;

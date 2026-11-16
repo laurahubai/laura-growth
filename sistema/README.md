@@ -21,6 +21,17 @@ pnpm install && pnpm dev        # telas em http://localhost:3200
 
 Portas: telas `3200`, API `8090`, banco `55433` (todas só em `127.0.0.1`). Acesso do Mac por túnel SSH.
 
+## Stage
+
+https://stage-growth.laurahub.com.br — só para os IPs liberados no nginx de stage (mesma lista do painel da Laura Hub).
+Roda como serviço: `laura-growth-api` (Go, 127.0.0.1:8090) e `laura-growth-web` (Next, 172.20.0.1:3210). Para publicar uma mudança:
+
+```bash
+cd backend && go build -o laura-growth-api . && set -a && . ../.env && set +a && ./laura-growth-api migrar
+cd ../apps/web && NODE_ENV=production ./node_modules/.bin/next build
+sudo systemctl restart laura-growth-api laura-growth-web
+```
+
 ## Testes
 
 ```bash
