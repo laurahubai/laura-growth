@@ -80,6 +80,7 @@ Por que SSE e não as alternativas:
 
 ## Onde fica o código
 - Repositório: `prplaurahub/laura-growth` (GitHub). Clone de trabalho na máquina `gcp-lhac-compozyos-001`, em `/lhac/dev/laura-growth`.
+- **Stage:** https://stage-growth.laurahub.com.br (desde 2026-11-16). Acesso liberado só para a mesma lista de IPs do stage da Laura Hub. Roda a versão da pasta de desenvolvimento, recompilada a cada publicação, e usa o mesmo banco de desenvolvimento.
 - A máquina **lê** o repositório com a chave dela, mas só **envia** alterações usando a chave do Mac, emprestada durante a conexão. A chave nunca é copiada para a máquina, que é descartável e compartilhada com outros agentes.
 
 ## Relacionado

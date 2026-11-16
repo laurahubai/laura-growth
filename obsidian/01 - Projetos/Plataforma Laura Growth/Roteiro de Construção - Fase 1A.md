@@ -62,11 +62,13 @@ Pronto quando:
 
 Pronto quando:
 - [ ] Os dois kits estão cadastrados com o material da etapa 0.
-- [ ] O kit de uma organização não aparece na outra.
+- [x] O kit de uma organização não aparece na outra.
 - [ ] Cada kit tem de 3 a 5 pilares de conteúdo.
-- [ ] Você informa site e perfis de uma marca, recebe um rascunho do kit e corrige antes de salvar.
+- [ ] Você informa site e perfis de uma marca, recebe um rascunho do kit e corrige antes de salvar. *(adiado: depende do fornecedor de IA, decidido em 2026-11-16)*
 
 O plano do primeiro mês, que fecha o onboarding, só passa a existir na etapa 6.
+
+> **Construído em 2026-11-16** (stage: https://stage-growth.laurahub.com.br): tela do kit com todos os campos do MKT-01, pilares (até 5, aviso abaixo de 3), cores, logo e arquivos de referência (PNG, JPG, WebP ou PDF, até 8 MB). Isolamento entre organizações verificado em testes automáticos e no navegador. **Falta:** cadastrar os dois kits com o material da etapa 0 (tarefa do Paulo) e o rascunho do kit por IA (adiado).
 
 ## Etapa 3 — Pauta e texto, com intervenção humana
 **Constrói:** o começo do fluxo de criação (etapas 1 e 2 do fluxo: pauta e texto), com os quatro comandos em cada passo: aprovar, pedir ajuste, editar à mão, descartar. O registro de tokens e custo nasce junto, mesmo sem tela ainda.
