@@ -1,0 +1,11 @@
+{
+  "name": "laura-growth",
+  "private": true,
+  "packageManager": "pnpm@11.24.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "pnpm --filter @laura-growth/web dev",
+    "build": "pnpm --filter @laura-growth/web build",
+    "typecheck": "pnpm -r typecheck"
+  }
+}

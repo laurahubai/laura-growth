@@ -1,0 +1,21 @@
+name: laura-growth-dev
+
+services:
+  postgres:
+    image: postgres:16.15-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: laura
+      POSTGRES_PASSWORD: ${LG_PG_SENHA:?defina LG_PG_SENHA no .env}
+      POSTGRES_DB: laura_growth
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - dados:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U laura -d laura_growth"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  dados:
