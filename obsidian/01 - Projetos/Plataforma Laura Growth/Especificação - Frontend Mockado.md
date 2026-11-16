@@ -1,6 +1,6 @@
 ---
 tipo: projeto
-status: rascunho
+status: aprovado
 area: Produto e Agentes de IA
 criado: 2026-11-15
 ---
@@ -56,46 +56,52 @@ Painel "Atividade do agente" no detalhe do post: os passos aparecem um a um enqu
 Organizações Laura Growth e Laura Hub; posts, textos, imagens, tokens e custos **fictícios** e marcados como exemplo. Fornecedor e preços de IA: a definir.
 
 ## Roteiro de homologação
+> **Homologado e aprovado pelo usuário em 2026-11-15**, com os ajustes registrados abaixo.
+
 ### J1 — Acesso e organizações
-- [ ] Entro com e-mail e senha.
-- [ ] Troco entre Laura Growth e Laura Hub e cada uma mostra só os seus dados.
+- [x] Entro com e-mail e senha.
+- [x] Troco entre Laura Growth e Laura Hub e cada uma mostra só os seus dados.
 
 ### J2 — Kit de marca
-- [ ] Edito o kit de uma organização e salvo.
-- [ ] O kit não aparece na outra organização.
+- [x] Edito o kit de uma organização e salvo.
+- [x] O kit não aparece na outra organização.
 
 ### J3 — Criar um post
-- [ ] Crio um post por pedido meu e outro aceitando sugestão de pauta.
-- [ ] Vejo o agente trabalhando ao vivo.
-- [ ] Peço ajuste com comentário e recebo nova versão; versões antigas ficam no histórico.
-- [ ] Edito o texto à mão.
-- [ ] Vejo a prévia por rede e aprovo; o post não fica aprovado sem minha ação.
-- [ ] Baixo o post pronto para publicação manual.
+- [x] Crio um post por pedido meu e outro aceitando sugestão de pauta.
+- [x] Vejo o agente trabalhando ao vivo.
+- [x] Peço ajuste com comentário e recebo nova versão; versões antigas ficam no histórico.
+- [x] Edito o texto à mão.
+- [x] Vejo a prévia por rede e aprovo; o post não fica aprovado sem minha ação.
+- [x] Baixo o post pronto para publicação manual.
 
 ### J6 — Automação do posicionamento (incluído em 2026-11-15)
 Cobre as sete sugestões aprovadas em [[Processo de Posicionamento Digital - Análise e Sugestões]].
-- [ ] Em "Nova marca", o agente rascunha o kit e eu corrijo antes de concluir.
-- [ ] O onboarding termina com a cadência definida e o plano da primeira semana.
-- [ ] No kit, edito os pilares de conteúdo (de 3 a 5).
-- [ ] No calendário, peço o plano da semana, ajusto e aprovo de uma vez.
-- [ ] Aprovar o plano cria os posts, mas nenhum fica aprovado para publicação.
-- [ ] Com o piloto automático, o post chega sozinho à aprovação final; consigo pausar no meio.
-- [ ] Cada post mostra pilar, objetivo (atrair, engajar ou converter) e CTA.
-- [ ] Em "Aprovações", aprovo ou devolvo um post após o outro na mesma tela.
-- [ ] Em Configurações, cadastro uma API de IA (com chave fictícia) e vejo a chave mascarada.
-- [ ] Escolho uma API para uma etapa, crio um post e vejo essa API no painel de Custos.
-- [ ] Escolho um fallback diferente da principal para uma etapa; sem principal, o fallback fica bloqueado.
+- [x] Em "Nova marca", o agente rascunha o kit e eu corrijo antes de concluir.
+- [x] O onboarding termina com a cadência definida e o plano da primeira semana.
+- [x] No kit, edito os pilares de conteúdo (de 3 a 5).
+- [x] No calendário, peço o plano da semana, ajusto e aprovo de uma vez.
+- [x] Aprovar o plano cria os posts, mas nenhum fica aprovado para publicação.
+- [x] Com o piloto automático, o post chega sozinho à aprovação final; consigo pausar no meio.
+- [x] Cada post mostra pilar, objetivo (atrair, engajar ou converter) e CTA.
+- [x] Em "Aprovações", aprovo ou devolvo um post após o outro na mesma tela.
+- [x] Em Configurações, cadastro uma API de IA (com chave fictícia) e vejo a chave mascarada.
+- [x] Escolho uma API para uma etapa, crio um post e vejo essa API no painel de Custos.
+- [x] Escolho um fallback diferente da principal para uma etapa; sem principal, o fallback fica bloqueado.
 
 **Limites do protótipo:** nenhuma API de IA é chamada de verdade e a chave digitada é descartada ao salvar (ficam só os 4 últimos caracteres; não usar chaves reais); o agente não lê site nem perfis de verdade (o rascunho do kit é um exemplo); o plano é semanal, não mensal; temas e textos são modelos fixos.
 
 ### J4 — Calendário e cadência
-- [ ] Vejo o mês com os estados dos posts.
-- [ ] Vejo um post atrasado e o aviso de cadência abaixo do planejado.
+- [x] Vejo o mês com os estados dos posts.
+- [x] Vejo um post atrasado e o aviso de cadência abaixo do planejado.
 
 ### J5 — Custos
-- [ ] Vejo tokens e dólares por organização, post, etapa e formato.
-- [ ] Vejo o custo médio por post, separando publicados e descartados.
-- [ ] Exporto a planilha.
+- [x] Vejo tokens e dólares por organização, post, etapa e formato.
+- [x] Vejo o custo médio por post, separando publicados e descartados.
+- [x] Exporto a planilha.
 
 ## Depois da homologação
 Registrar ajustes aqui e atualizar o [[Roteiro de Construção - Fase 1A]] antes do backend.
+
+### Ajustes registrados
+- **2026-11-15 — Prévias por rede (Aprovações e tela do post):** as prévias ficavam lado a lado, estreitas e cortadas. Agora ficam uma embaixo da outra, com a largura toda; as lâminas do carrossel continuam na horizontal dentro de cada prévia e a legenda aparece inteira, sem rolagem. *Feito no protótipo.*
+- **2026-11-15 — Configurações com cards e menu lateral:** a tela abria todos os parâmetros de uma vez e vai crescer bastante. Agora abre uma visão geral com **cards agrupados** (Agente e publicação · Inteligência artificial · Protótipo), sem nenhum parâmetro aberto. Cada card leva a uma página só daquela configuração, com **menu lateral** para ir às outras. Configuração nova = mais um card no grupo certo. Referências no Mobbin: [Plain](https://mobbin.com/screens/17d4e80d-877e-4605-b219-00d573ad455f), [incident.io](https://mobbin.com/screens/f12f3e02-0c13-47da-8369-65164d7c8bc6), [Featurebase](https://mobbin.com/screens/32b42868-60b6-460b-80f8-c9fb51fca937). *Feito no protótipo.*

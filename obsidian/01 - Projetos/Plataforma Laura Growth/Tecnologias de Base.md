@@ -32,9 +32,9 @@ Parte da etapa 0 do [[Roteiro de Construção - Fase 1A]].
 Observação: a Hub **não usa Tailwind** (os estilos ficam em CSS próprio, `globals.css`). Os tokens do [[Design System - Plataforma Laura Growth]] entram como variáveis nesse CSS.
 
 ## A peça nova: atualização ao vivo
-A Hub hoje não tem esse recurso. Proposta (**a confirmar**):
+A Hub hoje não tem esse recurso. **SSE aprovado pelo usuário em 2026-11-15.**
 
-**Tecnologia recomendada: SSE (Server-Sent Events)**
+**Tecnologia escolhida: SSE (Server-Sent Events)**
 > **SSE** = canal aberto em que o servidor vai "empurrando" novidades para a tela, sem a pessoa recarregar. É o mesmo tipo de mecanismo que ferramentas de IA usam para mostrar a resposta aparecendo aos poucos.
 
 Por que SSE e não as alternativas:
@@ -73,10 +73,10 @@ Por que SSE e não as alternativas:
 | `concluido` | Fim, com tokens e custo |
 
 ## Ainda a definir na etapa 0
-- [ ] Pasta do código da plataforma
-- [ ] Servidor onde a plataforma vai rodar
+- [x] Pasta do código da plataforma: máquina de desenvolvimento `gcp-lhac-compozyos-001`, pasta `/lhac/dev/laura-growth` *(decidido em 2026-11-15)*
+- [ ] Servidor onde a plataforma vai rodar em uso real *(a definir; os créditos da GCP vencem em 04/12/2026)*
 - [ ] Fornecedores de IA para texto e imagem
-- [ ] Copiar o código-base da Hub ou começar limpo usando as mesmas tecnologias (recomendação: **começar limpo**, reaproveitando peças como login e o `globals.css`, porque o código da Hub tem muita regra de clínica)
+- [x] Começar **do zero** com as mesmas tecnologias da Hub *(decidido em 2026-11-15)*, reaproveitando só peças pontuais (como login e o `globals.css`, porque o código da Hub tem muita regra de clínica)
 
 ## Relacionado
 [[Roteiro de Construção - Fase 1A]] · [[Design System - Plataforma Laura Growth]] · [[PRD - Agentes de IA]] · [[Laura Hub x Laura Growth]]

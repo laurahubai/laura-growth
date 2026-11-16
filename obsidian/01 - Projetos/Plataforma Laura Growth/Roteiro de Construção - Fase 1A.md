@@ -36,7 +36,8 @@ Parte do [[PRD - Plataforma Laura Growth]]. Detalha, em ordem, como construir o 
 Nada é construído aqui; são decisões e materiais que destravam o resto.
 
 - [x] Escolher a ferramenta de IA para construir a plataforma: **Claude Code**.
-- [ ] Definir em qual pasta ficará o código da plataforma (o cofre `obsidian/` é só para documentação) *(a definir)*.
+- [x] Homologar a jornada no frontend mockado: **aprovado em 2026-11-15**. Ver [[Especificação - Frontend Mockado]].
+- [x] Definir em qual pasta ficará o código da plataforma: máquina `gcp-lhac-compozyos-001`, pasta `/lhac/dev/laura-growth`. Código começa do zero; atualização ao vivo por SSE. Ver [[Tecnologias de Base]].
 - [x] Definir as tecnologias de base: **mesmas da Laura Hub**, com atualização da tela ao vivo enquanto a IA trabalha. Ver [[Tecnologias de Base]]. *(Servidor de hospedagem ainda a definir.)*
 - [ ] Escolher os fornecedores de IA para texto e para imagem *(a definir)*.
 - [ ] **Verificar o processo de autorização** de LinkedIn, Facebook e Instagram para publicação automática e dar entrada o quanto antes. É o item com maior risco de atraso ([[PRD - Conexões com Plataformas]]).

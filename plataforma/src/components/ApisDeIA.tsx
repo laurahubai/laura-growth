@@ -8,11 +8,11 @@ import type { ApiIA } from "@/mock/types";
 
 const VAZIA = { id: "", nome: "", tipo: "texto" as ApiIA["tipo"], endpoint: "", modelo: "", chave: "" };
 
-export function ApisDeIA() {
-  const { dados, salvarApi, removerApi, definirApiDaEtapa, definirFallbackDaEtapa } = useLoja();
+export function ApisCadastradas() {
+  const { dados, salvarApi, removerApi } = useLoja();
   const [form, setForm] = useState<typeof VAZIA | null>(null);
   if (!dados) return null;
-  const { apis, apiPorEtapa, fallbackPorEtapa } = dados;
+  const { apis } = dados;
 
   const existente = form ? apis.find((a) => a.id === form.id) : undefined;
   const invalido = !form || !form.nome.trim() || !form.endpoint.trim() || (!existente && form.chave.trim().length < 4);
@@ -29,11 +29,8 @@ export function ApisDeIA() {
     });
     setForm(null);
   };
-  const semApi = ETAPAS_IA.filter((e) => !apis.some((a) => a.id === apiPorEtapa[e.id]));
-  const semFallback = ETAPAS_IA.filter((e) => !semApi.includes(e) && !apis.some((a) => a.id === fallbackPorEtapa[e.id]));
 
   return (
-    <>
       <section className="card stack">
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2 style={{ margin: 0 }}>APIs de IA cadastradas</h2>
@@ -99,7 +96,17 @@ export function ApisDeIA() {
           <button className="btn" style={{ alignSelf: "flex-start" }} onClick={() => setForm({ ...VAZIA })}><Plus size={16} aria-hidden /> Adicionar API</button>
         )}
       </section>
+  );
+}
 
+export function ApiPorEtapa() {
+  const { dados, definirApiDaEtapa, definirFallbackDaEtapa } = useLoja();
+  if (!dados) return null;
+  const { apis, apiPorEtapa, fallbackPorEtapa } = dados;
+  const semApi = ETAPAS_IA.filter((e) => !apis.some((a) => a.id === apiPorEtapa[e.id]));
+  const semFallback = ETAPAS_IA.filter((e) => !semApi.includes(e) && !apis.some((a) => a.id === fallbackPorEtapa[e.id]));
+
+  return (
       <section className="card stack">
         <h2 style={{ margin: 0 }}>API usada em cada etapa</h2>
         <p className="muted" style={{ margin: 0 }}>Cada etapa do processo pode usar uma API diferente. A mesma API pode servir a várias etapas. O <b>fallback</b> é a API reserva: entra no lugar da principal quando ela falha (fora do ar, limite de uso atingido ou erro).</p>
@@ -140,6 +147,5 @@ export function ApisDeIA() {
         )}
         <p className="small muted">A escolha vale para as próximas tarefas dos agentes e aparece no painel de Custos. No protótipo nenhuma API é chamada de verdade, então o fallback nunca é acionado; ele só fica registrado.</p>
       </section>
-    </>
   );
 }

@@ -56,7 +56,7 @@ export function EtiquetasPauta({ pauta }: { pauta: Pauta }) {
 
 export function Previas({ post, org }: { post: Post; org: Organizacao }) {
   return (
-    <div className="grid g2">
+    <div className="stack">
       {post.pauta.redes.map((r) => <Previa key={r} rede={r} post={post} org={org} />)}
     </div>
   );
