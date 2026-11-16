@@ -50,9 +50,11 @@ Nada é construído aqui; são decisões e materiais que destravam o resto.
 **Requisitos:** ORG-01, ORG-02, ORG-03 ([[PRD - Modelo de Organizações]]).
 
 Pronto quando:
-- [ ] Você entra na plataforma com sua conta.
-- [ ] Existem duas organizações: Laura Growth e Laura Hub.
-- [ ] Você troca de uma para a outra e cada uma mostra só o que é dela.
+- [x] Você entra na plataforma com sua conta.
+- [x] Existem duas organizações: Laura Growth e Laura Hub.
+- [x] Você troca de uma para a outra e cada uma mostra só o que é dela.
+
+> **Concluída em 2026-11-16** na máquina de desenvolvimento (pasta `sistema/` do repositório). Verificado com testes automáticos (entrar, senha errada, troca de organização, recusa de organização alheia, sair, pedido de outro site, excesso de tentativas) e no navegador. Como rodar: `sistema/README.md`.
 
 ## Etapa 2 — Kit de marca
 **Constrói:** tela para cadastrar e editar o kit de cada organização, incluindo os pilares de conteúdo; envio de arquivos; onboarding assistido, em que o agente rascunha o kit a partir do site e dos perfis da marca.

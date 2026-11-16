@@ -78,5 +78,9 @@ Por que SSE e não as alternativas:
 - [ ] Fornecedores de IA para texto e imagem
 - [x] Começar **do zero** com as mesmas tecnologias da Hub *(decidido em 2026-11-15)*, reaproveitando só peças pontuais (como login e o `globals.css`, porque o código da Hub tem muita regra de clínica)
 
+## Onde fica o código
+- Repositório: `prplaurahub/laura-growth` (GitHub). Clone de trabalho na máquina `gcp-lhac-compozyos-001`, em `/lhac/dev/laura-growth`.
+- A máquina **lê** o repositório com a chave dela, mas só **envia** alterações usando a chave do Mac, emprestada durante a conexão. A chave nunca é copiada para a máquina, que é descartável e compartilhada com outros agentes.
+
 ## Relacionado
 [[Roteiro de Construção - Fase 1A]] · [[Design System - Plataforma Laura Growth]] · [[PRD - Agentes de IA]] · [[Laura Hub x Laura Growth]]
