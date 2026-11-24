@@ -10,6 +10,8 @@ Parte do [[PRD - Plataforma Laura Growth]]. Detalha, em ordem, como construir o 
 
 > Roteiro **planejado**. Datas e ferramentas: a definir.
 
+> **Atualização 2026-11-24:** ordem revista para a adequação ao PRD 2.0. Entram as etapas **2A a 2E** antes da etapa 3; o cadastro de IA sai da etapa 3 e vai para a 2A. Motivos e decisões: [[Adequação ao PRD 2.0]].
+
 ## Como usar este roteiro
 - Uma etapa por vez. Só passe para a próxima quando a lista "pronto quando" estiver toda marcada.
 - Cada etapa termina em algo que você consegue **ver e testar**.
@@ -22,6 +24,11 @@ Parte do [[PRD - Plataforma Laura Growth]]. Detalha, em ordem, como construir o 
 | 0 | Preparação | — |
 | 1 | Acesso e organizações | Não |
 | 2 | Kit de marca | Não |
+| 2A | Cadastro de IA (chave de API ou assinatura) + registro de tokens e US$ | Não |
+| 2B | Acessos por pessoa e por alçada | Não |
+| 2C | DNA da marca (kit ampliado, com versões) | Não |
+| 2D | Chat do CMO (onboarding conversado) | Parcial (DNA da marca) |
+| 2E | Plano de marketing com aprovação | Parcial (plano) |
 | 3 | Pauta e texto com intervenção humana + registro de custo | Parcial (textos) |
 | 4 | Imagem e carrossel | Parcial |
 | 5 | Revisão, aprovação final e entrega manual | **Sim — primeiro marco** |
@@ -66,15 +73,78 @@ Pronto quando:
 - [ ] Cada kit tem de 3 a 5 pilares de conteúdo.
 - [ ] Você informa site e perfis de uma marca, recebe um rascunho do kit e corrige antes de salvar. *(adiado: depende do fornecedor de IA, decidido em 2026-11-16)*
 
-O plano do primeiro mês, que fecha o onboarding, só passa a existir na etapa 6.
+O plano do primeiro mês, que fecha o onboarding, passa a existir na etapa 2E (antes: etapa 6). O rascunho do kit por IA passa a ser feito pelo chat do CMO (etapa 2D).
 
 > **Construído em 2026-11-16** (stage: https://stage-growth.laurahub.com.br): tela do kit com todos os campos do MKT-01, pilares (até 5, aviso abaixo de 3), cores, logo e arquivos de referência (PNG, JPG, WebP ou PDF, até 8 MB). Isolamento entre organizações verificado em testes automáticos e no navegador. **Falta:** cadastrar os dois kits com o material da etapa 0 (tarefa do Paulo) e o rascunho do kit por IA (adiado).
+
+## Etapa 2A — Cadastro de IA
+**Constrói:** cadastro de fornecedores de IA em Configurações, de dois tipos: **chave de API** ou **assinatura logada** (ex.: Claude Code, Codex, Antigravity). Escolha do fornecedor de cada etapa, com reserva. Registro de tokens e custo em US$ de toda atividade.
+**Requisitos:** AGT-07, AGT-08, AGT-09, CST-01; PRD 2.0 §8 e §12 (custo).
+
+Pronto quando:
+- [ ] Você cadastra pelo menos 2 fornecedores por serviço (texto e imagem).
+- [ ] A chave não aparece inteira depois de salva.
+- [ ] Você cadastra uma assinatura logada e a plataforma consegue usá-la em uma etapa.
+- [ ] Assinatura logada só pode ser usada pelas organizações da casa (Laura Hub e Laura Growth).
+- [ ] Você escolhe fornecedores diferentes por etapa; quando o principal falha, a reserva conclui a tarefa e o registro mostra qual foi usado.
+- [ ] Cada atividade grava tokens e US$; na assinatura o valor aparece marcado como **estimado**.
+
+**Antes de começar:** conferir os termos de uso das assinaturas para uso pela plataforma.
+
+## Etapa 2B — Acessos por pessoa e por alçada
+**Constrói:** convite de pessoas para uma organização e escolha, pessoa a pessoa, do que cada uma pode fazer. **Sem perfis fixos.**
+**Requisitos:** [[PRD - Permissões e Aprovações]]; PRD 2.0 §3.
+
+Pronto quando:
+- [ ] Você convida uma pessoa por e-mail para uma organização.
+- [ ] Você marca as alçadas dela uma a uma.
+- [ ] Uma pessoa sem a alçada não consegue fazer a ação, nem forçando pelo endereço da página (verificação no servidor).
+
+Lista de alçadas proposta *(a confirmar)*: ver a marca e os posts; conversar com o CMO e editar o DNA da marca; aprovar o plano de marketing; criar e editar posts; aprovar posts para publicação; conectar e desconectar redes; cadastrar fornecedores de IA; ver custos (US$ ou só créditos); convidar pessoas e dar acessos.
+
+## Etapa 2C — DNA da marca
+**Constrói:** o kit de marca ampliado com os campos essenciais do PRD 2.0, versões e a origem de cada informação.
+**Requisitos:** MKT-01, MKT-04; PRD 2.0 RF-02, RF-03, RF-10.
+
+Pronto quando:
+- [ ] O kit tem também: produtos ou serviços e qual priorizar, diferencial, modelo (B2B, B2C…), regiões, como os clientes compram, maior desafio, objetivo dos próximos 90 dias e canais escolhidos.
+- [ ] "O que evitar" fica em destaque (inclui as restrições do setor informadas pelo cliente).
+- [ ] Cada informação mostra se foi **confirmada por você** ou **sugerida pela IA**.
+- [ ] Toda gravação gera uma versão; você vê as anteriores e quem mudou.
+- [ ] Os dados já cadastrados no kit continuam lá.
+
+## Etapa 2D — Chat do CMO
+**Constrói:** o onboarding como conversa entre o CMO de IA e a pessoa, construindo as respostas juntos. Substitui o onboarding de 4 passos do protótipo, que vira a barra de progresso ao lado.
+**Requisitos:** MKT-05; PRD 2.0 RF-01, §7 e §8.
+
+Pronto quando:
+- [ ] O CMO faz uma pergunta principal por vez e explica por que precisa dela quando útil.
+- [ ] Quando você não sabe, ele propõe uma sugestão; ela entra no DNA como **sugerida** até você confirmar.
+- [ ] Ele não repete pergunta já confirmada.
+- [ ] Ao lado do chat aparecem o progresso, o que já foi aprendido e o que falta.
+- [ ] Você pausa, fecha a página e retoma de onde parou.
+- [ ] Com site e perfis informados (e sua autorização), ele lê as páginas públicas e propõe respostas para você confirmar.
+- [ ] Clínica de estética e empresa (Laura Hub e Laura Growth) recebem perguntas específicas diferentes.
+- [ ] A tela se atualiza ao vivo enquanto a IA trabalha.
+- [ ] Se a IA falhar, nada se perde e você pode tentar de novo ou responder à mão.
+- [ ] O custo de cada conversa é registrado.
+
+## Etapa 2E — Plano de marketing
+**Constrói:** plano gerado a partir do DNA da marca, com versões e aprovação.
+**Requisitos:** CAL-02, CAL-04; PRD 2.0 RF-08.
+
+Pronto quando:
+- [ ] O plano traz objetivo dos 90 dias, canais escolhidos, pilares com percentual, cadência por rede e os temas dos primeiros 30 dias.
+- [ ] Você pede ajustes em texto livre e recebe nova versão.
+- [ ] A aprovação registra quem aprovou, quando e qual versão.
+- [ ] Qualquer mudança no plano aprovado gera nova versão para aprovação; a anterior continua disponível.
+- [ ] Aprovar o plano não aprova nenhum post.
 
 ## Etapa 3 — Pauta e texto, com intervenção humana
 **Constrói:** o começo do fluxo de criação (etapas 1 e 2 do fluxo: pauta e texto), com os quatro comandos em cada passo: aprovar, pedir ajuste, editar à mão, descartar. O registro de tokens e custo nasce junto, mesmo sem tela ainda.
 Cada post nasce com pilar, objetivo e CTA. O agente avança sozinho pelas etapas (piloto automático) e você intervém quando quiser.
-É aqui que a IA de verdade entra: a etapa inclui o cadastro das APIs de IA (chave, endpoint e modelo) e a escolha da API de cada etapa, com uma API de fallback por etapa.
-**Requisitos:** POST-01, POST-02, POST-03, POST-04, POST-07, POST-08, POST-09, AGT-01, AGT-03, AGT-07, AGT-08, AGT-09, CST-01.
+O cadastro das APIs de IA, a escolha por etapa e a reserva passaram para a etapa 2A (2026-11-24).
+**Requisitos:** POST-01, POST-02, POST-03, POST-04, POST-07, POST-08, POST-09, AGT-01, AGT-03, CST-01.
 
 Pronto quando:
 - [ ] Você pede um post ou aceita uma sugestão de pauta.
@@ -82,9 +152,6 @@ Pronto quando:
 - [ ] Você pede um ajuste com um comentário e recebe nova versão.
 - [ ] As versões anteriores ficam guardadas.
 - [ ] Cada tarefa do agente grava tokens e custo em dólar.
-- [ ] Você cadastra uma API de IA em Configurações e a chave não aparece inteira depois de salva.
-- [ ] Você escolhe APIs diferentes para pauta e texto, e o registro de custo mostra qual foi usada.
-- [ ] Você define um fallback para uma etapa; quando a principal falha, a tarefa é concluída pela reserva e o custo mostra a reserva.
 - [ ] Cada post mostra seu pilar, seu objetivo (atrair, engajar ou converter) e seu CTA.
 - [ ] O agente passa da pauta ao texto sem esperar por você, e você consegue intervir no meio.
 
@@ -109,6 +176,8 @@ Pronto quando:
 - [ ] Você vê a prévia por rede antes de aprovar.
 - [ ] Você baixa o post aprovado e publica à mão.
 - [ ] Com vários posts aguardando, você aprova ou devolve um após o outro na mesma tela.
+- [ ] Qualquer mudança em um post aprovado o devolve para aprovação.
+- [ ] Post que contraria o "o que evitar" da marca fica **bloqueado**; regras do setor só geram **alerta**.
 
 **Primeiro marco:** a partir daqui você já economiza tempo na criação dos posts das duas marcas.
 
@@ -157,7 +226,7 @@ Pronto quando:
 ---
 
 ## O que não construir agora
-Convites e permissões, vídeo, TikTok, anúncios, relatórios, medição de resultados por post, link rastreável, alertas de regras do setor, créditos para o cliente, inglês. Tudo isso tem fase própria em [[PRD - Fases e Escopo]].
+Vídeo, TikTok, anúncios, relatórios, medição de resultados por post, link rastreável, alertas de regras do setor, créditos para o cliente, inglês. Tudo isso tem fase própria em [[PRD - Fases e Escopo]].
 
 ## Dependências entre as etapas
 - A etapa 0 (autorizações) corre em paralelo e só é cobrada na etapa 8.

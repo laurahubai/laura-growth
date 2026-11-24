@@ -6,6 +6,8 @@ criado: 2026-11-15
 ---
 # PRD — Plataforma Laura Growth
 
+> **Substituído** em 24/11/2026 pelo [[prd-lauragrowth20|PRD LauraGrowth 2.0]] (ver [[Adequação ao PRD 2.0]]). Mantido para consulta.
+
 > **PRD** = documento que descreve o que o produto precisa fazer e por quê, antes de ser construído.
 > Tudo aqui é **planejado**. Nada foi construído nem verificado.
 
