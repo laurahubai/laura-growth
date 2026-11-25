@@ -1,11 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
-import { carregarEnvSistema, validarBancoE2E } from "./e2e/env";
+import {
+  carregarEnvEfetivo,
+  validarBancoE2E,
+  validarEnderecoApiE2E,
+  validarPortaWebE2E,
+} from "./e2e/env";
 
-const envSistema = carregarEnvSistema();
-const bancoE2E = validarBancoE2E(process.env.LG_E2E_BANCO_URL || envSistema.LG_E2E_BANCO_URL);
-const apiEndereco = process.env.LG_API_ENDERECO || envSistema.LG_API_ENDERECO || "127.0.0.1:18090";
+const envEfetivo = carregarEnvEfetivo();
+const bancoE2E = validarBancoE2E(envEfetivo.LG_E2E_BANCO_URL);
+const apiEndereco = validarEnderecoApiE2E(envEfetivo.LG_E2E_API_ENDERECO);
+const webPorta = validarPortaWebE2E(envEfetivo.LG_E2E_WEB_PORTA);
 const apiUrl = `http://${apiEndereco}`;
-const webPorta = 13200;
 const webUrl = `http://127.0.0.1:${webPorta}`;
 
 export default defineConfig({
@@ -35,9 +40,9 @@ export default defineConfig({
       timeout: 120_000,
       reuseExistingServer: false,
       env: {
-        ...envSistema,
+        ...envEfetivo,
         LG_E2E_BANCO_URL: bancoE2E,
-        LG_API_ENDERECO: apiEndereco,
+        LG_E2E_API_ENDERECO: apiEndereco,
       },
     },
     {
@@ -46,8 +51,10 @@ export default defineConfig({
       timeout: 180_000,
       reuseExistingServer: false,
       env: {
-        LG_API_INTERNA: apiUrl,
-        LG_WEB_PORTA: String(webPorta),
+        ...envEfetivo,
+        LG_E2E_API_ENDERECO: apiEndereco,
+        LG_E2E_WEB_PORTA: webPorta,
+        LG_NEXT_DIST_DIR: ".next-e2e",
       },
     },
   ],

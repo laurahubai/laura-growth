@@ -4,27 +4,30 @@ import { fileURLToPath } from "node:url";
 
 const dirAtual = path.dirname(fileURLToPath(import.meta.url));
 
-export function carregarEnvSistema(): Record<string, string> {
+// Precedência consistente em todo o fluxo E2E: process.env sobrescreve sistema/.env.
+export function carregarEnvEfetivo(): Record<string, string> {
   const caminho = path.resolve(dirAtual, "../../../.env");
   const env: Record<string, string> = {};
-  if (!fs.existsSync(caminho)) {
-    return env;
-  }
-  const conteudo = fs.readFileSync(caminho, "utf8");
-  for (const linhaBruta of conteudo.split(/\r?\n/)) {
-    const linha = linhaBruta.trim();
-    if (!linha || linha.startsWith("#")) continue;
-    const idx = linha.indexOf("=");
-    if (idx <= 0) continue;
-    const chave = linha.slice(0, idx).trim();
-    let valor = linha.slice(idx + 1).trim();
-    if (
-      (valor.startsWith('"') && valor.endsWith('"')) ||
-      (valor.startsWith("'") && valor.endsWith("'"))
-    ) {
-      valor = valor.slice(1, -1);
+  if (fs.existsSync(caminho)) {
+    const conteudo = fs.readFileSync(caminho, "utf8");
+    for (const linhaBruta of conteudo.split(/\r?\n/)) {
+      const linha = linhaBruta.trim();
+      if (!linha || linha.startsWith("#")) continue;
+      const idx = linha.indexOf("=");
+      if (idx <= 0) continue;
+      const chave = linha.slice(0, idx).trim();
+      let valor = linha.slice(idx + 1).trim();
+      if (
+        (valor.startsWith('"') && valor.endsWith('"')) ||
+        (valor.startsWith("'") && valor.endsWith("'"))
+      ) {
+        valor = valor.slice(1, -1);
+      }
+      env[chave] = valor;
     }
-    env[chave] = valor;
+  }
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) env[k] = v;
   }
   return env;
 }
@@ -49,4 +52,26 @@ export function validarBancoE2E(urlBruta: string | undefined): string {
     );
   }
   return valor;
+}
+
+export function validarEnderecoApiE2E(enderecoBruto: string | undefined): string {
+  const endereco = (enderecoBruto ?? "").trim() || "127.0.0.1:18090";
+  let parsed: URL;
+  try {
+    parsed = new URL(`http://${endereco}`);
+  } catch {
+    throw new Error(`LG_E2E_API_ENDERECO inválido: ${endereco}`);
+  }
+  if (!parsed.port || parsed.port === "8090") {
+    throw new Error(`Recusado: a porta da API E2E (${parsed.port || "vazia"}) não pode ser 8090.`);
+  }
+  return endereco;
+}
+
+export function validarPortaWebE2E(portaBruta: string | undefined): string {
+  const porta = (portaBruta ?? "").trim() || "13200";
+  if (!/^\d+$/.test(porta) || Number(porta) <= 0 || porta === "3200") {
+    throw new Error(`Recusado: a porta web E2E (${porta}) é inválida ou usa a porta 3200.`);
+  }
+  return porta;
 }

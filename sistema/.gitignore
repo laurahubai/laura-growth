@@ -1,6 +1,7 @@
 .env
 node_modules/
 .next/
+.next-e2e/
 *.tsbuildinfo
 next-env.d.ts
 backend/laura-growth-api

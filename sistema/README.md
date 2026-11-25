@@ -40,13 +40,20 @@ pnpm typecheck
 pnpm e2e
 ```
 
-Para `pnpm e2e`, defina `LG_E2E_BANCO_URL` no `.env` apontando para um banco exclusivo cujo nome termine com `_teste` ou `_e2e` (os testes abortam antes de iniciar se o banco não seguir essa regra, evitando alterar o banco principal). Os testes criam um usuário comum temporário com senha aleatória por execução e o removem ao final.
+Para `pnpm e2e`, os pré-requisitos são:
 
-Na primeira vez em que rodar os testes de tela, instale o navegador Chromium do Playwright:
+1. **Banco exclusivo de E2E** cujo nome termine com `_teste` ou `_e2e` (ex.: `laura_growth_e2e`).
+2. **Variáveis no `.env`** (variáveis do ambiente sobrescrevem o `.env`):
+   - `LG_E2E_BANCO_URL`: obrigatória (os testes abortam antes de iniciar se estiver ausente ou se o nome do banco não terminar com `_teste` ou `_e2e`).
+   - `LG_CHAVE_CIFRAGEM`, `LG_SEMENTE_NOME`, `LG_SEMENTE_EMAIL`, `LG_SEMENTE_SENHA`.
+   - Opcionais: `LG_E2E_API_ENDERECO` (padrão `127.0.0.1:18090`; porta `8090` recusada) e `LG_E2E_WEB_PORTA` (padrão `13200`; porta `3200` recusada). A compilação do E2E usa `.next-e2e` para não sobrescrever `.next`.
+3. **Chromium do Playwright instalado** (na primeira execução):
 
 ```bash
 pnpm --filter @laura-growth/web exec playwright install chromium
 ```
+
+Os testes criam um usuário comum temporário com senha aleatória por execução e o removem ao final.
 
 ## Administração e IA (Etapa 2A-1)
 

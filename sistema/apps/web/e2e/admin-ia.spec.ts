@@ -3,16 +3,16 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { carregarEnvSistema, validarBancoE2E } from "./env";
+import { carregarEnvEfetivo, validarBancoE2E } from "./env";
 
 const dirAtual = path.dirname(fileURLToPath(import.meta.url));
 
-const envSistema = carregarEnvSistema();
-const bancoE2E = validarBancoE2E(process.env.LG_E2E_BANCO_URL || envSistema.LG_E2E_BANCO_URL);
-const adminEmail = envSistema.LG_SEMENTE_EMAIL ?? "admin-e2e@exemplo.test";
-const adminSenha = envSistema.LG_SEMENTE_SENHA ?? "";
+const envEfetivo = carregarEnvEfetivo();
+const bancoE2E = validarBancoE2E(envEfetivo.LG_E2E_BANCO_URL);
+const adminEmail = envEfetivo.LG_SEMENTE_EMAIL ?? "admin-e2e@exemplo.test";
+const adminSenha = envEfetivo.LG_SEMENTE_SENHA ?? "";
 const operacaoEmail = "operacao-e2e@exemplo.test";
-const operacaoSenha = process.env.LG_E2E_OPERACAO_SENHA || crypto.randomBytes(18).toString("base64url");
+const operacaoSenha = envEfetivo.LG_E2E_OPERACAO_SENHA || crypto.randomBytes(18).toString("base64url");
 
 async function entrar(page: Page, email: string, senha: string) {
   await page.goto("/entrar");
@@ -54,7 +54,7 @@ test.beforeAll(() => {
     cwd: backendDir,
     env: {
       ...process.env,
-      ...envSistema,
+      ...envEfetivo,
       LG_E2E_BANCO_URL: bancoE2E,
       LG_E2E_OPERACAO_EMAIL: operacaoEmail,
       LG_E2E_OPERACAO_SENHA: operacaoSenha,
@@ -69,7 +69,7 @@ test.afterAll(() => {
     cwd: backendDir,
     env: {
       ...process.env,
-      ...envSistema,
+      ...envEfetivo,
       LG_E2E_BANCO_URL: bancoE2E,
       LG_E2E_OPERACAO_EMAIL: operacaoEmail,
     },
@@ -171,7 +171,7 @@ test("caminho principal da Administração de IA: fornecedor simulado, modelos, 
   await expect(resultadoTeste).toContainText("Resposta simulada (simulado-texto): Oi, qual modelo é você?");
   await expect(resultadoTeste.locator("dd").nth(0)).toHaveText("12");
   await expect(resultadoTeste.locator("dd").nth(1)).toHaveText("18");
-  await expect(resultadoTeste.locator("dd").nth(3)).toContainText("US$");
+  await expect(resultadoTeste.locator("dd").nth(3)).toHaveText("US$ 0,000063");
 
   // Executa "Testar" em simulado-imagem e valida imagem, quantidade, US$ e selo Simulado.
   await linhaImagem.getByRole("button", { name: "Testar" }).click();
@@ -231,15 +231,28 @@ test("caminho principal da Administração de IA: fornecedor simulado, modelos, 
   await expect(linhaRegReserva.locator("td").nth(7)).toHaveText("Ok");
   await expect(linhaRegReserva).toContainText("Simulado");
   await expect(linhaRegReserva.locator("td").nth(9)).toHaveText("12 / 18");
-  await expect(linhaRegReserva.locator("td").nth(11)).toContainText("US$");
+  await expect(linhaRegReserva.locator("td").nth(11)).toHaveText("US$ 0,000063");
 });
 
-test("AC37: usuário comum não vê o menu Administração e abrir /admin redireciona para /inicio", async ({ page }) => {
+test("AC37 e AC30: usuário comum não vê o menu Administração, /admin redireciona para /inicio e Operação não mostra fornecedores", async ({ page }) => {
   await entrar(page, operacaoEmail, operacaoSenha);
 
   const menuPrincipal = page.getByRole("navigation", { name: "Menu principal" });
   await expect(menuPrincipal).toBeVisible();
   await expect(menuPrincipal.getByRole("link", { name: "Administração" })).toHaveCount(0);
+
+  // AC30: a tela de Operação (/inicio e /kit) não exibe fornecedores nem opções da Administração.
+  await expect(page.getByRole("heading", { name: "Organização ativa" })).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("OpenAI (referência E2E)");
+  await expect(page.locator("main")).not.toContainText("Simulado E2E");
+  await expect(page.locator("main")).not.toContainText("Fornecedores");
+
+  await page.goto("/kit");
+  await expect(page.getByRole("heading", { name: "Kit de marca" })).toBeVisible();
+  await expect(page.getByLabel("Site da marca")).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("OpenAI (referência E2E)");
+  await expect(page.locator("main")).not.toContainText("Simulado E2E");
+  await expect(page.locator("main")).not.toContainText("Fornecedores");
 
   await page.goto("/admin");
   await expect(page).toHaveURL(/\/inicio$/);
