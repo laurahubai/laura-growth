@@ -22,22 +22,33 @@ const (
 )
 
 type API struct {
-	banco        *Banco
-	cookieSeguro bool
-	limite       *limitador
-	agora        func() time.Time
+	banco               *Banco
+	cookieSeguro        bool
+	cifrador            *Cifrador
+	limite              *limitador
+	agora               func() time.Time
+	resolverIP          resolvedorIP
+	permitirRedeInterna bool // usado apenas em testes locais com httptest.NewTLSServer
 }
 
-func NovaAPI(banco *Banco, cookieSeguro bool) *API {
-	return &API{banco: banco, cookieSeguro: cookieSeguro, limite: novoLimitador(), agora: time.Now}
+func NovaAPI(banco *Banco, cookieSeguro bool, cifrador *Cifrador) *API {
+	return &API{
+		banco:        banco,
+		cookieSeguro: cookieSeguro,
+		cifrador:     cifrador,
+		limite:       novoLimitador(),
+		agora:        time.Now,
+		resolverIP:   resolverDNS,
+	}
 }
 
 // ---- Formato das respostas (espelha packages/contratos) ----
 
 type Usuario struct {
-	ID    string `json:"id"`
-	Nome  string `json:"nome"`
-	Email string `json:"email"`
+	ID              string `json:"id"`
+	Nome            string `json:"nome"`
+	Email           string `json:"email"`
+	AdminPlataforma bool   `json:"adminPlataforma"`
 }
 
 type Organizacao struct {
@@ -70,6 +81,7 @@ func (a *API) Rotas() http.Handler {
 	m.HandleFunc("PUT /api/sessao/organizacao", a.comSessao(a.trocarOrganizacao))
 	m.HandleFunc("GET /api/organizacao", a.comSessao(a.verOrganizacao))
 	a.rotasKit(m)
+	a.rotasAdmin(m)
 	return protegerOrigem(m)
 }
 
@@ -275,9 +287,9 @@ func (a *API) montarSessao(ctx context.Context, tokenHash []byte) (Sessao, error
 	var s Sessao
 	var ativa *string
 	err := a.banco.QueryRow(ctx, `
-		SELECT u.id::text, u.nome, u.email, s.organizacao_id::text
+		SELECT u.id::text, u.nome, u.email, u.admin_plataforma, s.organizacao_id::text
 		FROM sessoes s JOIN usuarios u ON u.id = s.usuario_id WHERE s.token_hash = $1`, tokenHash).
-		Scan(&s.Usuario.ID, &s.Usuario.Nome, &s.Usuario.Email, &ativa)
+		Scan(&s.Usuario.ID, &s.Usuario.Nome, &s.Usuario.Email, &s.Usuario.AdminPlataforma, &ativa)
 	if err != nil {
 		return s, err
 	}
