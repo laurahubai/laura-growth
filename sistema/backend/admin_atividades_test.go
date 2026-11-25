@@ -78,8 +78,8 @@ func prepararSimuladosCompletos(t *testing.T, c *cliente) (fornID, modTxt, modFa
 
 func TestAC29AC35TestarModeloTextoEImagem(t *testing.T) {
 	api := novaAPIAdminTeste(t)
-	agoraFixo := time.Date(2026, 11, 25, 14, 0, 0, 0, fusoSaoPaulo)
-	api.agora = func() time.Time { return agoraFixo }
+	agoraAtual := time.Date(2026, 11, 25, 14, 0, 0, 0, fusoSaoPaulo)
+	api.agora = func() time.Time { return agoraAtual }
 
 	c := novoCliente(t, api)
 	entrarComoPaulo(t, c)
@@ -107,6 +107,7 @@ func TestAC29AC35TestarModeloTextoEImagem(t *testing.T) {
 	}
 
 	// AC35 + AC29: testar imagem ("um círculo azul sobre fundo branco").
+	agoraAtual = agoraAtual.Add(time.Minute)
 	var resImg ResultadoTeste
 	if st := c.pedir("POST", "/api/admin/modelos/"+modImg+"/testar", nil, &resImg); st != 200 {
 		t.Fatalf("testar modelo imagem falhou: %d", st)
@@ -130,6 +131,37 @@ func TestAC29AC35TestarModeloTextoEImagem(t *testing.T) {
 	var comOrg int
 	if err := api.banco.QueryRow(context.Background(), `SELECT count(*) FROM ia_execucoes WHERE organizacao_id IS NOT NULL`).Scan(&comOrg); err != nil || comOrg != 0 {
 		t.Fatalf("testar modelo deveria gravar organizacao_id = NULL, encontrou %d com org (err=%v)", comOrg, err)
+	}
+
+	// Confere os preços vigentes gravados na execução (AC29).
+	var pEnt, pSai, pImg *string
+	if err := api.banco.QueryRow(context.Background(), `
+		SELECT preco_token_entrada::text, preco_token_saida::text, preco_imagem::text
+		FROM ia_execucoes WHERE id::text = $1`, resTxt.ExecucaoID).Scan(&pEnt, &pSai, &pImg); err != nil {
+		t.Fatal(err)
+	}
+	vEnt, okEnt := 0.0, pEnt != nil
+	if okEnt {
+		vEnt, okEnt = numeroDeTexto(*pEnt)
+	}
+	vSai, okSai := 0.0, pSai != nil
+	if okSai {
+		vSai, okSai = numeroDeTexto(*pSai)
+	}
+	if !okEnt || vEnt != 1000 || !okSai || vSai != 2000 || pImg != nil {
+		t.Fatalf("preços gravados em texto inesperados: ent=%v sai=%v img=%v", pEnt, pSai, pImg)
+	}
+	if err := api.banco.QueryRow(context.Background(), `
+		SELECT preco_token_entrada::text, preco_token_saida::text, preco_imagem::text
+		FROM ia_execucoes WHERE id::text = $1`, resImg.ExecucaoID).Scan(&pEnt, &pSai, &pImg); err != nil {
+		t.Fatal(err)
+	}
+	vImg, okImg := 0.0, pImg != nil
+	if okImg {
+		vImg, okImg = numeroDeTexto(*pImg)
+	}
+	if pEnt != nil || pSai != nil || !okImg || vImg != 0.05 {
+		t.Fatalf("preços gravados em imagem inesperados: ent=%v sai=%v img=%v", pEnt, pSai, pImg)
 	}
 
 	// Modelo inativo -> 409 modelo_inativo.
@@ -661,5 +693,55 @@ func TestConcorrenciaLimiteSerializadaPorTrava(t *testing.T) {
 	}
 	if chamadas.Load() != 1 {
 		t.Fatalf("fornecedor deveria ser chamado apenas 1 vez, foi %d", chamadas.Load())
+	}
+}
+
+func TestLimiteMensalUsaRelogioDaAplicacaoNaGravacao(t *testing.T) {
+	api := novaAPIAdminTeste(t)
+	// Usa um mês futuro diferente do relógio real do PostgreSQL para provar que
+	// o criado_em gravado em ia_execucoes segue a.agora() e entra na janela mensal.
+	mesFuturo := time.Date(2027, 3, 15, 10, 0, 0, 0, fusoSaoPaulo)
+	api.agora = func() time.Time { return mesFuturo }
+
+	c := novoCliente(t, api)
+	entrarComoPaulo(t, c)
+
+	var forn Fornecedor
+	if st := c.pedir("POST", "/api/admin/fornecedores", map[string]any{
+		"nome":            "Simulado Relógio",
+		"tipo":            "simulado",
+		"limiteMensalUsd": 0.04,
+	}, &forn); st != 201 {
+		t.Fatalf("criar fornecedor falhou: %d", st)
+	}
+	var mod Modelo
+	if st := c.pedir("POST", "/api/admin/fornecedores/"+forn.ID+"/modelos", map[string]any{
+		"identificador": "simulado-texto", "servico": "texto", "origem": "manual",
+	}, &mod); st != 201 {
+		t.Fatalf("criar modelo falhou: %d", st)
+	}
+	// 12 * 1000/1e6 + 18 * 2000/1e6 = 0.048 USD (> limite 0.04 USD na 1a chamada).
+	c.pedir("POST", "/api/admin/modelos/"+mod.ID+"/precos", map[string]any{
+		"unidade": "token_entrada", "precoUsd": 1000, "vigenciaInicio": "2026-11-01",
+	}, nil)
+	c.pedir("POST", "/api/admin/modelos/"+mod.ID+"/precos", map[string]any{
+		"unidade": "token_saida", "precoUsd": 2000, "vigenciaInicio": "2026-11-01",
+	}, nil)
+
+	var res ResultadoTeste
+	if st := c.pedir("POST", "/api/admin/modelos/"+mod.ID+"/testar", nil, &res); st != 200 {
+		t.Fatalf("1a chamada deveria passar, veio %d", st)
+	}
+
+	var criadoEm time.Time
+	if err := api.banco.QueryRow(context.Background(), `SELECT criado_em FROM ia_execucoes WHERE id::text = $1`, res.ExecucaoID).Scan(&criadoEm); err != nil {
+		t.Fatal(err)
+	}
+	if !criadoEm.Equal(mesFuturo) {
+		t.Fatalf("criado_em esperado %v (a.agora()), veio %v", mesFuturo, criadoEm)
+	}
+
+	if st, body := c.pedirComCorpo("POST", "/api/admin/modelos/"+mod.ID+"/testar", nil); st != 409 || !strings.Contains(string(body), "limite_atingido") {
+		t.Fatalf("2a chamada no mesmo mês de a.agora() esperava 409 limite_atingido, veio %d (%s)", st, body)
 	}
 }

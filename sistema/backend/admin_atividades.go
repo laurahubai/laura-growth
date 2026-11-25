@@ -877,6 +877,7 @@ func (a *API) inserirExecucaoEm(
 	if usuarioID != "" {
 		userParam = &usuarioID
 	}
+	agora := a.agora()
 	var id string
 	err := exec.QueryRow(ctx, `
 		INSERT INTO ia_execucoes (
@@ -885,16 +886,16 @@ func (a *API) inserirExecucaoEm(
 			tentativa, atendido_pela_reserva, status, erro,
 			tokens_entrada, tokens_saida, imagens,
 			preco_token_entrada, preco_token_saida, preco_imagem,
-			custo_usd, custo_estimado, simulado
+			custo_usd, custo_estimado, simulado, criado_em
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, false, $20)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, false, $20, $21)
 		RETURNING id::text`,
 		correlacaoID, atividade, orgParam, userParam,
 		cand.fornecedorID, cand.modeloID, cand.fornecedorNome, cand.identificador,
 		tentativa, atendidoPelaReserva, status, msgErro,
 		tokensIn, tokensOut, imgs,
 		precos.entrada, precos.saida, precos.imagem,
-		custoSQL, cand.fornecedorTipo == "simulado",
+		custoSQL, cand.fornecedorTipo == "simulado", agora,
 	).Scan(&id)
 	return id, err
 }
