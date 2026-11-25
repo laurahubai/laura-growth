@@ -95,6 +95,12 @@ func (a *API) rotasAdmin(m *http.ServeMux) {
 	m.HandleFunc("PATCH /api/admin/modelos/{id}", a.comAdmin(a.editarModelo))
 	m.HandleFunc("GET /api/admin/modelos/{id}/precos", a.comAdmin(a.listarPrecos))
 	m.HandleFunc("POST /api/admin/modelos/{id}/precos", a.comAdmin(a.criarPreco))
+	m.HandleFunc("POST /api/admin/modelos/{id}/testar", a.comAdmin(a.testarModelo))
+	m.HandleFunc("GET /api/admin/atividades", a.comAdmin(a.listarAtividades))
+	m.HandleFunc("PUT /api/admin/atividades/{atividade}", a.comAdmin(a.salvarRotaAtividade))
+	m.HandleFunc("POST /api/admin/atividades/{atividade}/testar", a.comAdmin(a.testarAtividade))
+	m.HandleFunc("GET /api/admin/execucoes", a.comAdmin(a.listarExecucoes))
+	m.HandleFunc("GET /api/admin/avisos", a.comAdmin(a.listarAvisos))
 }
 
 // comAdmin exige sessão válida e confere admin_plataforma no banco a cada pedido (AC30, AC37).
