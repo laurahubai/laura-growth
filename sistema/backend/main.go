@@ -48,11 +48,15 @@ func executar(ctx context.Context, comando string) error {
 }
 
 func servir(ctx context.Context, banco *Banco) error {
+	cifrador, err := novoCifrador(os.Getenv("LG_CHAVE_CIFRAGEM"))
+	if err != nil {
+		return err
+	}
 	endereco := os.Getenv("LG_API_ENDERECO")
 	if endereco == "" {
 		endereco = "127.0.0.1:8090"
 	}
-	api := NovaAPI(banco, os.Getenv("LG_COOKIE_SEGURO") == "true")
+	api := NovaAPI(banco, os.Getenv("LG_COOKIE_SEGURO") == "true", cifrador)
 	srv := &http.Server{
 		Addr:              endereco,
 		Handler:           api.Rotas(),
