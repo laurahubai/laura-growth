@@ -3,11 +3,18 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -163,6 +170,9 @@ func TestAC37AC30PermissaoAdminESemente(t *testing.T) {
 		{"GET", "/api/admin/fornecedores", nil},
 		{"POST", "/api/admin/fornecedores", map[string]any{"nome": "X", "tipo": "simulado", "limiteMensalUsd": 5}},
 		{"PATCH", "/api/admin/fornecedores/" + criado.ID, map[string]any{"nome": "Y"}},
+		{"DELETE", "/api/admin/fornecedores", nil},
+		{"GET", "/api/admin/rota-que-nao-existe", nil},
+		{"POST", "/api/admin", nil},
 	}
 	for _, rt := range rotas {
 		st, body := comum.pedirComCorpo(rt.metodo, rt.caminho, rt.corpo)
@@ -173,6 +183,13 @@ func TestAC37AC30PermissaoAdminESemente(t *testing.T) {
 		if err := json.Unmarshal(body, &errResp); err != nil || errResp["codigo"] != "sem_permissao" {
 			t.Fatalf("%s %s esperava codigo=sem_permissao, veio %s", rt.metodo, rt.caminho, body)
 		}
+	}
+	// Para administrador, rota desconhecida dá 404 e método não previsto dá 405.
+	if st, _ := paulo.pedirComCorpo("GET", "/api/admin/rota-que-nao-existe", nil); st != 404 {
+		t.Fatalf("rota desconhecida para admin esperava 404, veio %d", st)
+	}
+	if st, _ := paulo.pedirComCorpo("DELETE", "/api/admin/fornecedores", nil); st != 405 {
+		t.Fatalf("método não previsto para admin esperava 405, veio %d", st)
 	}
 	logs := bufLog.String()
 	if !strings.Contains(logs, comumID) || !strings.Contains(logs, "/api/admin/fornecedores") {
@@ -326,6 +343,10 @@ func TestAC39ProtecaoDeEnderecoEClienteSeguro(t *testing.T) {
 		"https://[fc00::1]",
 		"https://[fe80::1]",
 		"https://[::ffff:127.0.0.1]",
+		"https://[64:ff9b::127.0.0.1]",
+		"https://[2002:7f00:0001::1]",
+		"https://[2001:0000::1]",
+		"https://[::127.0.0.1]",
 		"https://localhost",
 		"https://metadata.google.internal",
 		"https://usuario:senha@api.openai.com/v1",
@@ -392,6 +413,104 @@ func TestAC39ProtecaoDeEnderecoEClienteSeguro(t *testing.T) {
 	if err := clienteSeg.CheckRedirect(reqFake, []*http.Request{reqFake}); !errors.Is(err, errRedirecionamentoRecusado) {
 		t.Fatal("novoClienteSeguro deveria recusar redirecionamento")
 	}
+
+	// DNS rebinding através do cliente de produção (novoClienteSeguro):
+	// resolvedor devolve 127.0.0.1 só na hora da conexão; erro deve ser errRedeInternaRecusada.
+	dnsAddr := iniciarDNSRebindingTeste(t)
+	srvRebind, poolRebind := iniciarTLSComDominioTeste(t, "rebind.exemplo")
+	defer srvRebind.Close()
+	_, porta, _ := net.SplitHostPort(strings.TrimPrefix(srvRebind.URL, "https://"))
+
+	anteriorResolver := resolvedorDial
+	resolvedorDial = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "udp", dnsAddr)
+		},
+	}
+	defer func() { resolvedorDial = anteriorResolver }()
+
+	clienteProd := novoClienteSeguro(2 * time.Second)
+	trProd := clienteProd.Transport.(*http.Transport)
+	trProd.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: poolRebind}
+
+	if _, err := clienteProd.Get("https://rebind.exemplo:" + porta); !errors.Is(err, errRedeInternaRecusada) {
+		t.Fatalf("DNS rebinding deveria falhar com errRedeInternaRecusada, veio: %v", err)
+	}
+}
+
+func iniciarDNSRebindingTeste(t *testing.T) string {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pc.Close() })
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			n, addr, err := pc.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			if n < 17 {
+				continue
+			}
+			// Encontra o fim do QNAME na pergunta.
+			i := 12
+			for i < n && buf[i] != 0 {
+				i += int(buf[i]) + 1
+			}
+			if i+5 > n {
+				continue
+			}
+			qend := i + 5
+			qtype := uint16(buf[i+1])<<8 | uint16(buf[i+2])
+			resp := make([]byte, 0, qend+16)
+			resp = append(resp, buf[0], buf[1], 0x81, 0x80, 0, 1, 0, 0, 0, 0, 0, 0)
+			resp = append(resp, buf[12:qend]...)
+			if qtype == 1 { // A -> 127.0.0.1
+				resp[7] = 1
+				resp = append(resp, 0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 1, 0, 4, 127, 0, 0, 1)
+			}
+			_, _ = pc.WriteTo(resp, addr)
+		}
+	}()
+	return pc.LocalAddr().String()
+}
+
+func iniciarTLSComDominioTeste(t *testing.T, dominio string) (*httptest.Server, *x509.CertPool) {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: dominio},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:              []string{dominio},
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certParsed, _ := x509.ParseCertificate(der)
+	pool := x509.NewCertPool()
+	pool.AddCert(certParsed)
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv.TLS = &tls.Config{
+		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: priv}},
+	}
+	srv.StartTLS()
+	return srv, pool
 }
 
 func TestFornecedoresRegrasLimitesEFuso(t *testing.T) {
@@ -524,6 +643,22 @@ func TestFornecedoresRegrasLimitesEFuso(t *testing.T) {
 	}
 	if st, body := c.pedirComCorpo("PATCH", "/api/admin/fornecedores/00000000-0000-0000-0000-000000000000", map[string]any{"nome": "X"}); st != 404 || !strings.Contains(string(body), "nao_encontrado") {
 		t.Fatalf("PATCH id inexistente esperava 404 nao_encontrado, veio %d (%s)", st, body)
+	}
+
+	// Validação de chave: mínimo 12 caracteres, apenas ASCII visível (sem espaços internos ou quebras de linha); pontas aparadas.
+	for _, ruim := range []string{"curta-12345", "sk-espaco interno 123", "sk-quebra\nlinha123", "sk-não-ascii-12345"} {
+		if st, body := c.pedirComCorpo("POST", "/api/admin/fornecedores", map[string]any{
+			"nome": "Chave Ruim", "tipo": "openai", "chave": ruim, "limiteMensalUsd": 10,
+		}); st != 400 || !strings.Contains(string(body), "formato_invalido") {
+			t.Fatalf("POST chave inválida %q esperava 400 formato_invalido, veio %d (%s)", ruim, st, body)
+		}
+		if st, body := c.pedirComCorpo("PATCH", "/api/admin/fornecedores/"+oai.ID, map[string]any{"chave": ruim}); st != 400 || !strings.Contains(string(body), "formato_invalido") {
+			t.Fatalf("PATCH chave inválida %q esperava 400 formato_invalido, veio %d (%s)", ruim, st, body)
+		}
+	}
+	var aparada Fornecedor
+	if st := c.pedir("PATCH", "/api/admin/fornecedores/"+oai.ID, map[string]any{"chave": "  " + chaveAPINovaTeste + "\t "}, &aparada); st != 200 || aparada.ChaveFinal == nil || *aparada.ChaveFinal != "9876" {
+		t.Fatalf("PATCH chave com espaços nas pontas falhou: %d %+v", st, aparada)
 	}
 
 	// Aritmética exata com frações decimais (0.1 + 0.2 = 0.30 de 0.30 -> limite; 0.24 de 0.30 -> aviso).
