@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { Home, LogOut, Palette } from "lucide-react";
+import { Home, LogOut, Palette, ShieldCheck } from "lucide-react";
 import { FalhaApi, useSair, useSessao, useTrocarOrganizacao } from "@/lib/api";
 
 // Itens entram no menu conforme as etapas do roteiro ficam prontas.
@@ -43,6 +43,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
             ))}
           </div>
         ))}
+        {s.usuario.adminPlataforma && (
+          <div style={{ display: "contents" }}>
+            <div className="nav-grupo">Plataforma</div>
+            <Link href="/admin" className={`nav-item ${rota.startsWith("/admin") ? "ativo" : ""}`}>
+              <ShieldCheck size={18} aria-hidden /> Administração
+            </Link>
+          </div>
+        )}
       </nav>
       <div className="main">
         <header className="topbar">

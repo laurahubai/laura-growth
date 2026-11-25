@@ -2,14 +2,47 @@
 // Conversa com a API (/api/...) e guarda as respostas em cache (TanStack Query).
 // Tudo o que pertence a uma organização usa a chave ["org", idDaOrganização, ...]:
 // ao trocar de organização, nada da anterior aparece na tela.
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArquivoMarca, ErroApi, OrganizacaoDetalhe, RespostaKit, Sessao, type KitMarca, type PedidoEntrar } from "@laura-growth/contratos";
+// Tudo o que pertence à Administração da plataforma usa a chave ["admin", ...].
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArquivoMarca,
+  ErroApi,
+  Fornecedor,
+  Modelo,
+  OrganizacaoDetalhe,
+  Preco,
+  RespostaAtividades,
+  RespostaAvisos,
+  RespostaExecucoes,
+  RespostaFornecedores,
+  RespostaKit,
+  RespostaLerModelos,
+  RespostaModelos,
+  RespostaPrecos,
+  ResultadoAtividade,
+  ResultadoTeste,
+  RotaAtividade,
+  Sessao,
+  type Atividade,
+  type KitMarca,
+  type PedidoEditarFornecedor,
+  type PedidoEditarModelo,
+  type PedidoEntrar,
+  type PedidoNovoFornecedor,
+  type PedidoNovoModelo,
+  type PedidoNovoPreco,
+  type PedidoRotaAtividade,
+} from "@laura-growth/contratos";
 import type { z } from "zod";
 
 export class FalhaApi extends Error {
   constructor(public status: number, public codigo: string, mensagem: string) {
     super(mensagem);
   }
+}
+
+export function erroSemPermissao(e: unknown): boolean {
+  return e instanceof FalhaApi && e.status === 403 && e.codigo === "sem_permissao";
 }
 
 async function chamar<T>(metodo: string, caminho: string, esquema: z.ZodType<T> | null, corpo?: unknown): Promise<T> {
@@ -115,3 +148,180 @@ export function useRemoverArquivo(orgId: string) {
 }
 
 export const urlArquivo = (id: string, baixar = false) => `/api/kit/arquivos/${encodeURIComponent(id)}${baixar ? "?baixar=1" : ""}`;
+
+// ---- Administração da plataforma (etapa 2A-1) ----
+
+const tentarAdmin = (n: number, e: Error) =>
+  !(e instanceof FalhaApi && (e.status === 401 || e.status === 403)) && n < 2;
+
+export function useAvisosAdmin(habilitado = true) {
+  return useQuery({
+    queryKey: ["admin", "avisos"],
+    queryFn: () => chamar("GET", "/api/admin/avisos", RespostaAvisos),
+    enabled: habilitado,
+    retry: tentarAdmin,
+  });
+}
+
+export function useFornecedoresAdmin() {
+  return useQuery({
+    queryKey: ["admin", "fornecedores"],
+    queryFn: () => chamar("GET", "/api/admin/fornecedores", RespostaFornecedores),
+    retry: tentarAdmin,
+  });
+}
+
+export function useCriarFornecedor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: PedidoNovoFornecedor) => chamar("POST", "/api/admin/fornecedores", Fornecedor, p),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "fornecedores"] });
+      qc.invalidateQueries({ queryKey: ["admin", "avisos"] });
+    },
+  });
+}
+
+export function useEditarFornecedor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dados }: { id: string; dados: PedidoEditarFornecedor }) =>
+      chamar("PATCH", `/api/admin/fornecedores/${encodeURIComponent(id)}`, Fornecedor, dados),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "fornecedores"] });
+      qc.invalidateQueries({ queryKey: ["admin", "avisos"] });
+      qc.invalidateQueries({ queryKey: ["admin", "atividades"] });
+    },
+  });
+}
+
+export function useLerModelos(fornecedorId: string) {
+  return useMutation({
+    mutationFn: () =>
+      chamar("POST", `/api/admin/fornecedores/${encodeURIComponent(fornecedorId)}/ler-modelos`, RespostaLerModelos),
+  });
+}
+
+export function useModelosFornecedor(fornecedorId: string) {
+  return useQuery({
+    queryKey: ["admin", "fornecedores", fornecedorId, "modelos"],
+    queryFn: () =>
+      chamar("GET", `/api/admin/fornecedores/${encodeURIComponent(fornecedorId)}/modelos`, RespostaModelos),
+    enabled: Boolean(fornecedorId),
+    retry: tentarAdmin,
+  });
+}
+
+export function useTodosModelosAdmin(fornecedorIds: string[]) {
+  return useQueries({
+    queries: fornecedorIds.map((id) => ({
+      queryKey: ["admin", "fornecedores", id, "modelos"] as const,
+      queryFn: () =>
+        chamar("GET", `/api/admin/fornecedores/${encodeURIComponent(id)}/modelos`, RespostaModelos),
+      enabled: Boolean(id),
+      retry: tentarAdmin,
+    })),
+  });
+}
+
+export function useCriarModelo(fornecedorId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: PedidoNovoModelo) =>
+      chamar("POST", `/api/admin/fornecedores/${encodeURIComponent(fornecedorId)}/modelos`, Modelo, p),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "fornecedores", fornecedorId, "modelos"] });
+      qc.invalidateQueries({ queryKey: ["admin", "atividades"] });
+    },
+  });
+}
+
+export function useEditarModelo(fornecedorId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dados }: { id: string; dados: PedidoEditarModelo }) =>
+      chamar("PATCH", `/api/admin/modelos/${encodeURIComponent(id)}`, Modelo, dados),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "fornecedores", fornecedorId, "modelos"] });
+      qc.invalidateQueries({ queryKey: ["admin", "atividades"] });
+      qc.invalidateQueries({ queryKey: ["admin", "avisos"] });
+    },
+  });
+}
+
+export function usePrecosModelo(modeloId: string) {
+  return useQuery({
+    queryKey: ["admin", "modelos", modeloId, "precos"],
+    queryFn: () => chamar("GET", `/api/admin/modelos/${encodeURIComponent(modeloId)}/precos`, RespostaPrecos),
+    enabled: Boolean(modeloId),
+    retry: tentarAdmin,
+  });
+}
+
+export function useCriarPreco(modeloId: string, fornecedorId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: PedidoNovoPreco) =>
+      chamar("POST", `/api/admin/modelos/${encodeURIComponent(modeloId)}/precos`, Preco, p),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "modelos", modeloId, "precos"] });
+      qc.invalidateQueries({ queryKey: ["admin", "fornecedores", fornecedorId, "modelos"] });
+      qc.invalidateQueries({ queryKey: ["admin", "atividades"] });
+    },
+  });
+}
+
+export function useTestarModelo(fornecedorId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (modeloId: string) =>
+      chamar("POST", `/api/admin/modelos/${encodeURIComponent(modeloId)}/testar`, ResultadoTeste),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "avisos"] });
+      qc.invalidateQueries({ queryKey: ["admin", "fornecedores"] });
+      qc.invalidateQueries({ queryKey: ["admin", "fornecedores", fornecedorId, "modelos"] });
+      qc.invalidateQueries({ queryKey: ["admin", "execucoes"] });
+    },
+  });
+}
+
+export function useAtividadesAdmin() {
+  return useQuery({
+    queryKey: ["admin", "atividades"],
+    queryFn: () => chamar("GET", "/api/admin/atividades", RespostaAtividades),
+    retry: tentarAdmin,
+  });
+}
+
+export function useSalvarAtividade() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ atividade, dados }: { atividade: Atividade; dados: PedidoRotaAtividade }) =>
+      chamar("PUT", `/api/admin/atividades/${encodeURIComponent(atividade)}`, RotaAtividade, dados),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "atividades"] });
+    },
+  });
+}
+
+export function useTestarAtividade() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (atividade: Atividade) =>
+      chamar("POST", `/api/admin/atividades/${encodeURIComponent(atividade)}/testar`, ResultadoAtividade),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "avisos"] });
+      qc.invalidateQueries({ queryKey: ["admin", "fornecedores"] });
+      qc.invalidateQueries({ queryKey: ["admin", "atividades"] });
+      qc.invalidateQueries({ queryKey: ["admin", "execucoes"] });
+    },
+  });
+}
+
+export function useExecucoesAdmin(limite = 100) {
+  return useQuery({
+    queryKey: ["admin", "execucoes", limite],
+    queryFn: () => chamar("GET", `/api/admin/execucoes?limite=${limite}`, RespostaExecucoes),
+    retry: tentarAdmin,
+  });
+}
