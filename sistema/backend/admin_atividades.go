@@ -348,7 +348,7 @@ func (a *API) testarAtividade(w http.ResponseWriter, r *http.Request, s contexto
 	if def.Servico == "imagem" {
 		prompt = promptTesteImagem
 	}
-	res, statusHTTP, codErro, msgErro := a.executarAtividade(r.Context(), def.Codigo, "", s.usuario.ID, prompt)
+	res, statusHTTP, codErro, msgErro := a.executarAtividadePlataforma(r.Context(), def.Codigo, s.usuario.ID, prompt)
 	if statusHTTP != 0 {
 		erro(w, statusHTTP, codErro, msgErro)
 		return
@@ -473,9 +473,19 @@ func (a *API) listarAvisos(w http.ResponseWriter, r *http.Request, _ contextoSes
 
 // ---- Executor de atividades ----
 
-// executarAtividade executa uma atividade com principal e reserva, gravando uma
-// linha por tentativa em ia_execucoes. Reutilizada pelo endpoint de teste e pelas etapas seguintes.
+// executarAtividade executa uma atividade com principal e reserva para uma organização,
+// gravando uma linha por tentativa em ia_execucoes. Chamada com orgID vazio sempre nega fornecedores "casa".
 func (a *API) executarAtividade(ctx context.Context, atividade, orgID, usuarioID, prompt string) (ResultadoAtividade, int, string, string) {
+	return a.executarAtividadeInterna(ctx, atividade, orgID, usuarioID, prompt, false)
+}
+
+// executarAtividadePlataforma executa o teste administrativo de atividade da plataforma
+// (sempre com organizacao_id = NULL e tratado como da casa; uso exclusivo de testarAtividade).
+func (a *API) executarAtividadePlataforma(ctx context.Context, atividade, usuarioID, prompt string) (ResultadoAtividade, int, string, string) {
+	return a.executarAtividadeInterna(ctx, atividade, "", usuarioID, prompt, true)
+}
+
+func (a *API) executarAtividadeInterna(ctx context.Context, atividade, orgID, usuarioID, prompt string, plataformaCasa bool) (ResultadoAtividade, int, string, string) {
 	def, ok := mapaAtividades[atividade]
 	if !ok {
 		return ResultadoAtividade{}, 404, "nao_encontrado", "Atividade não encontrada."
@@ -490,7 +500,9 @@ func (a *API) executarAtividade(ctx context.Context, atividade, orgID, usuarioID
 	}
 
 	orgDaCasa := false
-	if orgID != "" {
+	if plataformaCasa && orgID == "" {
+		orgDaCasa = true
+	} else if orgID != "" {
 		err := a.banco.QueryRow(ctx, `SELECT da_casa FROM organizacoes WHERE id::text = $1`, orgID).Scan(&orgDaCasa)
 		if errors.Is(err, pgx.ErrNoRows) {
 			orgDaCasa = false
@@ -652,6 +664,8 @@ func travarFornecedorTx(ctx context.Context, tx pgx.Tx, fornecedorID string) err
 
 // executarComTrava serializa a conferência de limite mensal e a gravação da execução por fornecedor
 // usando pg_advisory_xact_lock na transação.
+// Nota: a trava consultiva e a conexão do banco ficam presas durante a chamada HTTP ao fornecedor
+// (uma conexão em uso por chamada ativa por fornecedor); revisitar com reserva de saldo antes de abrir a clientes.
 func (a *API) executarComTrava(
 	ctx context.Context,
 	cand candidatoExecucao,

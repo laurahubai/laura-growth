@@ -356,6 +356,19 @@ func TestAC30UsoSoDaCasaERotas403S3(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Testar atividade (rota admin da plataforma) pode usar fornecedor "casa" e grava organizacao_id = NULL.
+	var resTestePlat ResultadoAtividade
+	if st := c.pedir("POST", "/api/admin/atividades/chat_cmo/testar", nil, &resTestePlat); st != 200 {
+		t.Fatalf("POST /api/admin/atividades/chat_cmo/testar esperava 200, veio %d", st)
+	}
+	if resTestePlat.AtendidoPelaReserva || resTestePlat.AtendidoPor.ID != modCasa {
+		t.Fatalf("testar atividade da plataforma deveria usar principal 'casa', veio %+v", resTestePlat)
+	}
+	var comOrg int
+	if err := api.banco.QueryRow(context.Background(), `SELECT count(*) FROM ia_execucoes WHERE correlacao_id::text = $1 AND organizacao_id IS NOT NULL`, resTestePlat.CorrelacaoID).Scan(&comOrg); err != nil || comOrg != 0 {
+		t.Fatalf("testar atividade deveria gravar organizacao_id = NULL, encontrou %d com org (err=%v)", comOrg, err)
+	}
+
 	// Organização da casa usa o fornecedor "casa" normalmente.
 	resCasa, st, _, _ := api.executarAtividade(context.Background(), "chat_cmo", lauraID, "", "Oi")
 	if st != 0 || resCasa.AtendidoPelaReserva || resCasa.AtendidoPor.ID != modCasa {
