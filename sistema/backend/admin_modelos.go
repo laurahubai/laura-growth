@@ -343,6 +343,40 @@ func (a *API) editarModelo(w http.ResponseWriter, r *http.Request, _ contextoSes
 			erro(w, 400, "servico_invalido", "A Anthropic não gera imagens.")
 			return
 		}
+		if *p.Servico != servico {
+			linhas, err := a.banco.Query(r.Context(), `
+				SELECT atividade FROM ia_rotas
+				WHERE modelo_principal_id::text = $1 OR modelo_reserva_id::text = $1
+				ORDER BY atividade`, id)
+			if err != nil {
+				falhaInterna(w, err)
+				return
+			}
+			var emUso []string
+			for linhas.Next() {
+				var cod string
+				if err := linhas.Scan(&cod); err != nil {
+					linhas.Close()
+					falhaInterna(w, err)
+					return
+				}
+				nomeAtv := cod
+				if def, ok := mapaAtividades[cod]; ok {
+					nomeAtv = def.Nome
+				}
+				emUso = append(emUso, nomeAtv)
+			}
+			if err := linhas.Err(); err != nil {
+				linhas.Close()
+				falhaInterna(w, err)
+				return
+			}
+			linhas.Close()
+			if len(emUso) > 0 {
+				erro(w, 409, "servico_incompativel", "Não é possível trocar o serviço: modelo em uso em "+strings.Join(emUso, ", ")+".")
+				return
+			}
+		}
 		servico = *p.Servico
 	}
 	if p.LimiteMensalUsd.definido {
@@ -417,7 +451,12 @@ func (a *API) consultarModelos(ctx context.Context, fornecedorID, modeloID strin
 				SELECT sum(e.custo_usd)
 				FROM ia_execucoes e
 				WHERE e.modelo_id = m.id AND e.criado_em >= $1 AND e.criado_em < $2
-			), 0)::text AS gasto_mes_usd
+			), 0)::text AS gasto_mes_usd,
+			COALESCE((
+				SELECT sum(ef.custo_usd)
+				FROM ia_execucoes ef
+				WHERE ef.fornecedor_id = f.id AND ef.criado_em >= $1 AND ef.criado_em < $2
+			), 0)::text AS gasto_fornecedor_mes_usd
 		FROM ia_modelos m
 		JOIN ia_fornecedores f ON f.id = m.fornecedor_id`
 	args := []any{inicioMes, proximoMes}
@@ -435,13 +474,14 @@ func (a *API) consultarModelos(ctx context.Context, fornecedorID, modeloID strin
 	}
 	type modeloBruto struct {
 		modelo      Modelo
-		gastoStr    string
+		gastoModStr string
+		gastoSitStr string
 		limiteEfStr string
 		avisoEf     int
 	}
 	brutos, err := pgx.CollectRows(linhas, func(l pgx.CollectableRow) (modeloBruto, error) {
 		var b modeloBruto
-		var tipoForn, limFornStr, gastoStr string
+		var tipoForn, limFornStr, gastoModStr, gastoFornStr string
 		var limModStr *string
 		var avisoForn int
 		var avisoMod *int
@@ -449,11 +489,12 @@ func (a *API) consultarModelos(ctx context.Context, fornecedorID, modeloID strin
 			&b.modelo.ID, &b.modelo.FornecedorID, &b.modelo.FornecedorNome, &tipoForn,
 			&b.modelo.Identificador, &b.modelo.Servico, &b.modelo.Origem,
 			&limModStr, &avisoMod, &b.modelo.Ativo,
-			&limFornStr, &avisoForn, &gastoStr,
+			&limFornStr, &avisoForn, &gastoModStr, &gastoFornStr,
 		); err != nil {
 			return b, err
 		}
 		b.modelo.Simulado = tipoForn == "simulado"
+		b.gastoModStr = gastoModStr
 		if limModStr != nil {
 			v, ok := numeroDeTexto(*limModStr)
 			if !ok {
@@ -461,15 +502,16 @@ func (a *API) consultarModelos(ctx context.Context, fornecedorID, modeloID strin
 			}
 			b.modelo.LimiteMensalUsd = &v
 			b.limiteEfStr = *limModStr
+			b.gastoSitStr = gastoModStr
 		} else {
 			b.limiteEfStr = limFornStr
+			b.gastoSitStr = gastoFornStr
 		}
 		b.modelo.AvisoPercentual = avisoMod
 		b.avisoEf = avisoForn
 		if avisoMod != nil {
 			b.avisoEf = *avisoMod
 		}
-		b.gastoStr = gastoStr
 		return b, nil
 	})
 	if err != nil {
@@ -478,7 +520,11 @@ func (a *API) consultarModelos(ctx context.Context, fornecedorID, modeloID strin
 
 	modelos := make([]Modelo, 0, len(brutos))
 	for _, b := range brutos {
-		situacao, gasto, _, err := calcularSituacaoLimite(b.gastoStr, b.limiteEfStr, b.avisoEf)
+		gastoMod, ok := numeroDeTexto(b.gastoModStr)
+		if !ok {
+			return nil, errors.New("gasto do modelo inválido")
+		}
+		situacao, _, _, err := calcularSituacaoLimite(b.gastoSitStr, b.limiteEfStr, b.avisoEf)
 		if err != nil {
 			return nil, err
 		}
@@ -486,7 +532,7 @@ func (a *API) consultarModelos(ctx context.Context, fornecedorID, modeloID strin
 		if err != nil {
 			return nil, err
 		}
-		b.modelo.GastoMesUsd = gasto
+		b.modelo.GastoMesUsd = gastoMod
 		b.modelo.Situacao = situacao
 		b.modelo.PrecosVigentes = precos
 		modelos = append(modelos, b.modelo)
@@ -576,13 +622,14 @@ func (a *API) listarPrecos(w http.ResponseWriter, r *http.Request, _ contextoSes
 
 func (a *API) criarPreco(w http.ResponseWriter, r *http.Request, _ contextoSessao) {
 	modeloID := r.PathValue("id")
-	var existe bool
-	if err := a.banco.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM ia_modelos WHERE id::text = $1)`, modeloID).Scan(&existe); err != nil {
-		falhaInterna(w, err)
+	var servicoModelo string
+	err := a.banco.QueryRow(r.Context(), `SELECT servico FROM ia_modelos WHERE id::text = $1`, modeloID).Scan(&servicoModelo)
+	if errors.Is(err, pgx.ErrNoRows) {
+		erro(w, 404, "nao_encontrado", "Modelo não encontrado.")
 		return
 	}
-	if !existe {
-		erro(w, 404, "nao_encontrado", "Modelo não encontrado.")
+	if err != nil {
+		falhaInterna(w, err)
 		return
 	}
 
@@ -592,6 +639,14 @@ func (a *API) criarPreco(w http.ResponseWriter, r *http.Request, _ contextoSessa
 	}
 	if !unidadesValidas[p.Unidade] {
 		erro(w, 400, "dados_invalidos", "Unidade de preço inválida.")
+		return
+	}
+	if servicoModelo == "texto" && p.Unidade == "imagem" {
+		erro(w, 400, "formato_invalido", "Modelo de texto não aceita preço por imagem.")
+		return
+	}
+	if servicoModelo == "imagem" && p.Unidade == "token_saida" {
+		erro(w, 400, "formato_invalido", "Modelo de imagem aceita apenas preço por imagem ou token de entrada.")
 		return
 	}
 	if p.PrecoUsd == nil {
@@ -614,7 +669,7 @@ func (a *API) criarPreco(w http.ResponseWriter, r *http.Request, _ contextoSessa
 
 	var criado Preco
 	var precoStr string
-	err := a.banco.QueryRow(r.Context(), `
+	err = a.banco.QueryRow(r.Context(), `
 		INSERT INTO ia_precos (modelo_id, unidade, preco_usd, vigencia_inicio)
 		VALUES ($1, $2, $3, $4::date)
 		RETURNING id::text, modelo_id::text, unidade, preco_usd::text, to_char(vigencia_inicio, 'YYYY-MM-DD'), criado_em`,
