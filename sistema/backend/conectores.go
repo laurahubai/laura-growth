@@ -21,6 +21,7 @@ const (
 	limiteRespostaPadrao = int64(2 << 20)  // 2 MB para listagens e texto
 	limiteRespostaImagem = int64(20 << 20) // 20 MB para geração de imagem em base64
 	maxPaginasAnthropic  = 20
+	maxTokensFornecedor  = 10_000_000
 )
 
 // PNG com um círculo azul sobre fundo branco para respostas previsíveis do conector simulado.
@@ -168,6 +169,9 @@ func (c *conectorOpenAI) gerarTexto(ctx context.Context, modelo, prompt string) 
 	if len(resp.Choices) == 0 {
 		return respostaTextoIA{}, &erroFornecedor{codigo: "fornecedor_erro", mensagem: "O fornecedor não retornou nenhuma resposta."}
 	}
+	if err := validarTokensFornecedor(resp.Usage.PromptTokens, resp.Usage.CompletionTokens); err != nil {
+		return respostaTextoIA{}, err
+	}
 	return respostaTextoIA{
 		Texto:         resp.Choices[0].Message.Content,
 		TokensEntrada: resp.Usage.PromptTokens,
@@ -207,6 +211,9 @@ func (c *conectorOpenAI) gerarImagem(ctx context.Context, modelo, prompt string)
 	mime := http.DetectContentType(brutoImg)
 	if mime != "image/png" && mime != "image/jpeg" && mime != "image/webp" {
 		return respostaImagemIA{}, &erroFornecedor{codigo: "fornecedor_erro", mensagem: "O fornecedor retornou um formato de imagem não aceito."}
+	}
+	if err := validarTokensFornecedor(resp.Usage.InputTokens, resp.Usage.OutputTokens); err != nil {
+		return respostaImagemIA{}, err
 	}
 	return respostaImagemIA{
 		ImagemDataUrl: "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(brutoImg),
@@ -301,6 +308,9 @@ func (c *conectorAnthropic) gerarTexto(ctx context.Context, modelo, prompt strin
 	if len(partes) == 0 {
 		return respostaTextoIA{}, &erroFornecedor{codigo: "fornecedor_erro", mensagem: "O fornecedor não retornou texto."}
 	}
+	if err := validarTokensFornecedor(resp.Usage.InputTokens, resp.Usage.OutputTokens); err != nil {
+		return respostaTextoIA{}, err
+	}
 	return respostaTextoIA{
 		Texto:         strings.Join(partes, ""),
 		TokensEntrada: resp.Usage.InputTokens,
@@ -316,6 +326,16 @@ func (c *conectorAnthropic) gerarImagem(_ context.Context, _, _ string) (respost
 }
 
 // ---- Auxiliares comuns ----
+
+func validarTokensFornecedor(entrada, saida int) error {
+	if entrada < 0 || entrada > maxTokensFornecedor || saida < 0 || saida > maxTokensFornecedor {
+		return &erroFornecedor{
+			codigo:   "fornecedor_erro",
+			mensagem: "O fornecedor informou uma quantidade de tokens fora do limite permitido.",
+		}
+	}
+	return nil
+}
 
 func extrairIDsModelos(total int, pegar func(int) string) []string {
 	vistos := map[string]bool{}

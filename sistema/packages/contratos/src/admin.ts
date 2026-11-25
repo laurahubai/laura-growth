@@ -9,6 +9,8 @@
 // - A chave de API nunca volta em resposta nenhuma: só chaveFinal (4 últimos caracteres).
 // - Datas: ISO 8601 (criadoEm) e "AAAA-MM-DD" (vigenciaInicio).
 // - Erros: { codigo, mensagem } (ErroApi), com mensagem pronta para mostrar na tela.
+//   Códigos transversais comuns: 400 dados_invalidos | formato_invalido,
+//   403 sem_permissao, 404 nao_encontrado, 500 falha_interna (mensagem genérica, sem detalhes internos).
 import { z } from "zod";
 
 // ---- Enumerações ----
@@ -96,8 +98,9 @@ export type Fornecedor = z.infer<typeof Fornecedor>;
 export const RespostaFornecedores = z.object({ fornecedores: z.array(Fornecedor) });
 
 // POST /api/admin/fornecedores -> 201 Fornecedor
-// chave: obrigatória, exceto no simulado. endereco: se vazio, usa o padrão do tipo.
-// Erros: 400 dados_invalidos | endereco_invalido (sem https ou rede interna) | chave_obrigatoria; 409 nome_repetido.
+// chave: obrigatória, exceto no simulado; mínimo de 12 caracteres ASCII visíveis (máx. 500, sem espaços/quebras).
+// endereco: se vazio, usa o padrão do tipo.
+// Erros: 400 dados_invalidos | formato_invalido (chave fora do padrão) | endereco_invalido (sem https ou rede interna) | chave_obrigatoria; 409 nome_repetido.
 export const PedidoNovoFornecedor = z.object({
   nome: z.string().trim().min(1, "Informe o nome.").max(100),
   tipo: TipoFornecedor,
@@ -110,7 +113,8 @@ export const PedidoNovoFornecedor = z.object({
 export type PedidoNovoFornecedor = z.infer<typeof PedidoNovoFornecedor>;
 
 // PATCH /api/admin/fornecedores/{id} -> 200 Fornecedor. Campos ausentes não mudam.
-// chave: troca a chave. ativo=false desativa (nada é apagado). O tipo não muda.
+// chave: troca a chave (mínimo de 12 caracteres ASCII visíveis, máx. 500). ativo=false desativa (nada é apagado). O tipo não muda.
+// Erros: 400 dados_invalidos | formato_invalido | endereco_invalido; 404 nao_encontrado; 409 nome_repetido.
 export const PedidoEditarFornecedor = z.object({
   nome: z.string().trim().min(1).max(100).optional(),
   endereco: z.string().trim().max(500).optional(),
