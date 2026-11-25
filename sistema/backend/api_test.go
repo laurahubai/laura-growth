@@ -105,7 +105,7 @@ func (c *cliente) pedir(metodo, caminho string, corpo any, resposta any) int {
 }
 
 func TestEtapa1AcessoEOrganizacoes(t *testing.T) {
-	api := NovaAPI(prepararBanco(t), false)
+	api := NovaAPI(prepararBanco(t), false, nil)
 	c := novoCliente(t, api)
 
 	if st := c.pedir("GET", "/api/sessao", nil, nil); st != 401 {
@@ -163,7 +163,7 @@ func TestEtapa1AcessoEOrganizacoes(t *testing.T) {
 }
 
 func TestPedidoDeOutroSiteERecusado(t *testing.T) {
-	api := NovaAPI(prepararBanco(t), false)
+	api := NovaAPI(prepararBanco(t), false, nil)
 	srv := httptest.NewServer(api.Rotas())
 	defer srv.Close()
 	req, _ := http.NewRequest("POST", srv.URL+"/api/sessao", bytes.NewBufferString(`{"email":"paulo@exemplo.com","senha":"`+senhaTeste+`"}`))
@@ -180,7 +180,7 @@ func TestPedidoDeOutroSiteERecusado(t *testing.T) {
 }
 
 func TestMuitasTentativasBloqueiam(t *testing.T) {
-	api := NovaAPI(prepararBanco(t), false)
+	api := NovaAPI(prepararBanco(t), false, nil)
 	c := novoCliente(t, api)
 	for i := 0; i < 8; i++ {
 		c.pedir("POST", "/api/sessao", map[string]string{"email": "paulo@exemplo.com", "senha": "errada"}, nil)

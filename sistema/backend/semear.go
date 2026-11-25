@@ -37,8 +37,8 @@ func semear(ctx context.Context, banco *Banco, nome, email, senha string) error 
 
 	var usuarioID string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO usuarios (nome, email, senha_hash) VALUES ($1, $2, $3)
-		ON CONFLICT ((lower(email))) DO UPDATE SET nome = EXCLUDED.nome, senha_hash = EXCLUDED.senha_hash
+		INSERT INTO usuarios (nome, email, senha_hash, admin_plataforma) VALUES ($1, $2, $3, true)
+		ON CONFLICT ((lower(email))) DO UPDATE SET nome = EXCLUDED.nome, senha_hash = EXCLUDED.senha_hash, admin_plataforma = true
 		RETURNING id`, nome, email, hash).Scan(&usuarioID)
 	if err != nil {
 		return err
@@ -47,10 +47,12 @@ func semear(ctx context.Context, banco *Banco, nome, email, senha string) error 
 		var orgID string
 		err := tx.QueryRow(ctx, `SELECT id FROM organizacoes WHERE nome = $1`, o.nome).Scan(&orgID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			if err := tx.QueryRow(ctx, `INSERT INTO organizacoes (nome, tipo) VALUES ($1, $2) RETURNING id`, o.nome, o.tipo).Scan(&orgID); err != nil {
+			if err := tx.QueryRow(ctx, `INSERT INTO organizacoes (nome, tipo, da_casa) VALUES ($1, $2, true) RETURNING id`, o.nome, o.tipo).Scan(&orgID); err != nil {
 				return err
 			}
 		} else if err != nil {
+			return err
+		} else if _, err := tx.Exec(ctx, `UPDATE organizacoes SET da_casa = true WHERE id = $1 AND NOT da_casa`, orgID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO membros (organizacao_id, usuario_id, papel) VALUES ($1, $2, 'dono')

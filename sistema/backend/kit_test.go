@@ -59,7 +59,7 @@ func entrarComoPaulo(t *testing.T, c *cliente) Sessao {
 }
 
 func TestEtapa2KitDeMarca(t *testing.T) {
-	api := NovaAPI(prepararBanco(t), false)
+	api := NovaAPI(prepararBanco(t), false, nil)
 	c := novoCliente(t, api)
 	s := entrarComoPaulo(t, c)
 	growth, hub := s.Organizacoes[0], s.Organizacoes[1]
