@@ -27,7 +27,7 @@ const (
 	maxPilares        = 5
 	maxCores          = 5
 	maxTextoKit       = 5000
-	maxTextoPilar     = 80
+	maxTextoPilar     = 500
 	maxTamanhoArquivo = 8 << 20 // 8 MB
 	maxReferencias    = 30
 )

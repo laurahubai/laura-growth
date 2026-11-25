@@ -29,6 +29,9 @@ export default function Kit() {
   const [alterado, setAlterado] = useState(false);
   // Índice do item recém-adicionado, para levar o cursor até ele.
   const [focar, setFocar] = useState<{ lista: "pilares" | "cores"; i: number } | null>(null);
+  // Cores com código digitado inválido (bloqueiam o salvar) e versão para recriar os campos ao remover uma cor.
+  const [coresInvalidas, setCoresInvalidas] = useState<Set<number>>(new Set());
+  const [versaoCores, setVersaoCores] = useState(0);
 
   useEffect(() => {
     if (kit.data && !alterado) {
@@ -73,11 +76,12 @@ export default function Kit() {
             </label>
           ))}
           <div className="row" style={{ borderTop: "1px solid var(--laura-border)", paddingTop: 12 }}>
-            <button className="btn primario" type="submit" disabled={salvar.isPending || !alterado}>
+            <button className="btn primario" type="submit" disabled={salvar.isPending || !alterado || coresInvalidas.size > 0}>
               {salvar.isPending ? "Salvando…" : "Salvar kit de marca"}
             </button>
             {salvar.isSuccess && !alterado && <span role="status" style={{ color: "var(--laura-success)" }}>Kit salvo.</span>}
             {alterado && !salvar.isPending && <span className="small muted">Alterações não salvas.</span>}
+            {coresInvalidas.size > 0 && <span role="alert" style={{ color: "var(--laura-danger)" }}>Corrija o código da cor antes de salvar.</span>}
             {salvar.isError && <span role="alert" style={{ color: "var(--laura-danger)" }}>{salvar.error.message}</span>}
           </div>
           {atualizado && <p className="small muted" style={{ margin: 0 }}>Última gravação: {new Date(atualizado).toLocaleString("pt-BR")}</p>}
@@ -88,15 +92,19 @@ export default function Kit() {
             <h2 style={{ margin: 0 }}>Pilares de conteúdo</h2>
             <p className="small muted" style={{ margin: 0 }}>Os {LIMITES_KIT.pilaresMin} a {LIMITES_KIT.pilaresMax} assuntos fixos sobre os quais a marca sempre fala. O agente distribui os posts entre eles.</p>
             {r.pilares.map((p, i) => (
-              <div key={i} className="row" style={{ flexWrap: "nowrap" }}>
-                <input
-                  style={{ flex: 1, minWidth: 0 }}
-                  autoFocus={focar?.lista === "pilares" && focar.i === i}
-                  value={p}
-                  maxLength={LIMITES_KIT.pilarMax}
-                  aria-label={`Pilar ${i + 1}`}
-                  onChange={(e) => mudar({ ...r, pilares: r.pilares.map((x, j) => (j === i ? e.target.value : x)) })}
-                />
+              <div key={i} className="row" style={{ flexWrap: "nowrap", alignItems: "flex-start" }}>
+                <div className="stack" style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                  <textarea
+                    rows={3}
+                    style={{ minHeight: 72 }}
+                    autoFocus={focar?.lista === "pilares" && focar.i === i}
+                    value={p}
+                    maxLength={LIMITES_KIT.pilarMax}
+                    aria-label={`Pilar ${i + 1}`}
+                    onChange={(e) => mudar({ ...r, pilares: r.pilares.map((x, j) => (j === i ? e.target.value : x)) })}
+                  />
+                  <span className="small muted num" style={{ alignSelf: "flex-end" }}>{p.length}/{LIMITES_KIT.pilarMax}</span>
+                </div>
                 <button type="button" className="btn peq" aria-label={`Remover pilar ${i + 1}`} onClick={() => mudar({ ...r, pilares: r.pilares.filter((_, j) => j !== i) })}>
                   <X size={14} aria-hidden />
                 </button>
@@ -113,11 +121,15 @@ export default function Kit() {
           <section className="card stack">
             <h2 style={{ margin: 0 }}>Cores</h2>
             {r.cores.map((c, i) => (
-              <div key={i} className="row">
-                <input type="color" value={c} aria-label={`Cor ${i + 1}`} onChange={(e) => mudar({ ...r, cores: r.cores.map((x, j) => (j === i ? e.target.value : x)) })} />
-                <span className="num">{c}</span>
+              <div key={`${versaoCores}-${i}`} className="row">
+                <CampoCor
+                  cor={c}
+                  indice={i}
+                  onCor={(nova) => mudar({ ...r, cores: r.cores.map((x, j) => (j === i ? nova : x)) })}
+                  onValida={(ok) => setCoresInvalidas((s) => { const n = new Set(s); if (ok) n.delete(i); else n.add(i); return n; })}
+                />
                 <span className="small muted">{NOMES_CORES[i] ?? "Apoio"}</span>
-                <button type="button" className="btn peq" style={{ marginLeft: "auto" }} aria-label={`Remover cor ${i + 1}`} onClick={() => mudar({ ...r, cores: r.cores.filter((_, j) => j !== i) })}>
+                <button type="button" className="btn peq" style={{ marginLeft: "auto" }} aria-label={`Remover cor ${i + 1}`} onClick={() => { setCoresInvalidas(new Set()); setVersaoCores((v) => v + 1); mudar({ ...r, cores: r.cores.filter((_, j) => j !== i) }); }}>
                   <X size={14} aria-hidden />
                 </button>
               </div>
@@ -132,6 +144,45 @@ export default function Kit() {
           <Arquivos orgId={orgId} arquivos={kit.data.arquivos} cor={r.cores[0]} inicial={sessao.organizacaoAtiva.nome[0]} />
         </div>
       </form>
+    </>
+  );
+}
+
+// Seletor de cor + campo para digitar o código hexa (#RRGGBB, aceita sem # e minúsculas).
+function CampoCor({ cor, indice, onCor, onValida }: { cor: string; indice: number; onCor: (c: string) => void; onValida: (ok: boolean) => void }) {
+  const [texto, setTexto] = useState(cor);
+  const normalizar = (t: string) => {
+    const s = t.trim().replace(/^#?/, "#");
+    return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toLowerCase() : null;
+  };
+  const valido = normalizar(texto) !== null;
+
+  // Cor escolhida no seletor (ou vinda de fora) atualiza o texto.
+  useEffect(() => {
+    setTexto((t) => (normalizar(t) === cor.toLowerCase() ? t : cor));
+  }, [cor]);
+  useEffect(() => { onValida(valido); }, [valido]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <>
+      <input type="color" value={cor} aria-label={`Cor ${indice + 1}`} onChange={(e) => onCor(e.target.value)} />
+      <input
+        className="num"
+        style={{ width: "9ch", borderColor: valido ? undefined : "var(--laura-danger)" }}
+        value={texto}
+        maxLength={7}
+        placeholder="#RRGGBB"
+        spellCheck={false}
+        aria-label={`Código hexa da cor ${indice + 1}`}
+        aria-invalid={!valido}
+        onChange={(e) => {
+          setTexto(e.target.value);
+          const n = normalizar(e.target.value);
+          if (n && n !== cor.toLowerCase()) onCor(n);
+        }}
+        onBlur={() => { const n = normalizar(texto); if (n) setTexto(n); }}
+      />
+      {!valido && <span className="small" style={{ color: "var(--laura-danger)" }}>Use o formato #RRGGBB</span>}
     </>
   );
 }

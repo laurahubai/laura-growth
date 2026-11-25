@@ -7,3 +7,6 @@ minimumReleaseAgeExclude:
 
 onlyBuiltDependencies:
   - sharp
+
+# Depósito próprio da Laura Growth (não compartilha arquivos com a Laura Hub; ver nota de 25/11/2026)
+storeDir: ../.pnpm-store

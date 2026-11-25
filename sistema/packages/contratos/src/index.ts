@@ -49,7 +49,7 @@ export const nomeTipoOrganizacao: Record<TipoOrganizacao, string> = {
 
 // ---- Etapa 2: kit de marca ----
 
-export const LIMITES_KIT = { pilaresMin: 3, pilaresMax: 5, coresMax: 5, textoMax: 5000, pilarMax: 80, arquivoMaxMB: 8 } as const;
+export const LIMITES_KIT = { pilaresMin: 3, pilaresMax: 5, coresMax: 5, textoMax: 5000, pilarMax: 500, arquivoMaxMB: 8 } as const;
 
 export const KitMarca = z.object({
   organizacaoId: z.string(),
