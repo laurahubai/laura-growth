@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -28,7 +29,8 @@ type API struct {
 	limite              *limitador
 	agora               func() time.Time
 	resolverIP          resolvedorIP
-	permitirRedeInterna bool // usado apenas em testes locais com httptest.NewTLSServer
+	permitirRedeInterna bool        // usado apenas em testes locais com httptest.NewTLSServer
+	tlsTeste            *tls.Config // usado apenas em testes locais com httptest.NewTLSServer
 }
 
 func NovaAPI(banco *Banco, cookieSeguro bool, cifrador *Cifrador) *API {

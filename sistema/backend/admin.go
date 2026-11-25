@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -88,6 +89,12 @@ func (a *API) rotasAdmin(m *http.ServeMux) {
 	m.HandleFunc("GET /api/admin/fornecedores", a.comAdmin(a.listarFornecedores))
 	m.HandleFunc("POST /api/admin/fornecedores", a.comAdmin(a.criarFornecedor))
 	m.HandleFunc("PATCH /api/admin/fornecedores/{id}", a.comAdmin(a.editarFornecedor))
+	m.HandleFunc("POST /api/admin/fornecedores/{id}/ler-modelos", a.comAdmin(a.lerModelosFornecedor))
+	m.HandleFunc("GET /api/admin/fornecedores/{id}/modelos", a.comAdmin(a.listarModelos))
+	m.HandleFunc("POST /api/admin/fornecedores/{id}/modelos", a.comAdmin(a.criarModelo))
+	m.HandleFunc("PATCH /api/admin/modelos/{id}", a.comAdmin(a.editarModelo))
+	m.HandleFunc("GET /api/admin/modelos/{id}/precos", a.comAdmin(a.listarPrecos))
+	m.HandleFunc("POST /api/admin/modelos/{id}/precos", a.comAdmin(a.criarPreco))
 }
 
 // comAdmin exige sessão válida e confere admin_plataforma no banco a cada pedido (AC30, AC37).
@@ -476,6 +483,30 @@ func ultimosQuatro(chave string) string {
 		return chave
 	}
 	return string(r[len(r)-4:])
+}
+
+func (a *API) clienteHTTPFornecedor(timeout time.Duration) *http.Client {
+	if !a.permitirRedeInterna {
+		return novoClienteSeguro(timeout)
+	}
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if a.tlsTeste != nil {
+		tlsCfg = a.tlsTeste.Clone()
+		if tlsCfg.MinVersion < tls.VersionTLS12 {
+			tlsCfg.MinVersion = tls.VersionTLS12
+		}
+	}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			TLSClientConfig:     tlsCfg,
+			TLSHandshakeTimeout: timeout,
+			ForceAttemptHTTP2:   true,
+		},
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return errRedirecionamentoRecusado
+		},
+	}
 }
 
 func novoUUID() (string, error) {
