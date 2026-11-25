@@ -7,7 +7,8 @@
     "dev": "next dev -H 127.0.0.1 -p 3200",
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 3200",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@laura-growth/contratos": "workspace:*",
@@ -20,6 +21,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@types/node": "22.15.3",
     "@types/react": "19.1.2",
     "@types/react-dom": "19.1.2",

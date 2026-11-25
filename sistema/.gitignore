@@ -4,3 +4,7 @@ node_modules/
 *.tsbuildinfo
 next-env.d.ts
 backend/laura-growth-api
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/

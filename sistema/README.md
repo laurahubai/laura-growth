@@ -35,6 +35,19 @@ sudo systemctl restart laura-growth-api laura-growth-web
 ## Testes
 
 ```bash
-cd backend && set -a && . ../.env && set +a && go test ./...
+cd backend && set -a && . ../.env && set +a && go test -cover ./...
 pnpm typecheck
+pnpm e2e
 ```
+
+Na primeira vez em que rodar os testes de tela, instale o navegador Chromium do Playwright:
+
+```bash
+pnpm --filter @laura-growth/web exec playwright install chromium
+```
+
+## Administração e IA (Etapa 2A-1)
+
+- **`LG_CHAVE_CIFRAGEM` é obrigatória**: o servidor Go não sobe sem ela (mínimo 32 caracteres). Gere com `openssl rand -base64 48`, coloque apenas em `.env` e **nunca versione** `.env`, chaves ou senhas.
+- **Fornecedor simulado e modelo com falha**: o tipo `simulado` responde localmente sem internet (`simulado-texto` e `simulado-imagem`). Qualquer modelo cujo identificador contenha `falha` (ex.: `simulado-falha`) falha de propósito para validar a troca automática para o modelo reserva e o registro de tentativas.
+- **Geração real de imagens (OpenAI)**: o fluxo completo de imagem foi validado nos testes com o conector simulado; a geração real na OpenAI ainda deve ser confirmada com uma chave contratada válida.
