@@ -12,10 +12,16 @@ import (
 	"image/png"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
-const versaoAnthropic = "2023-06-01"
+const (
+	versaoAnthropic      = "2023-06-01"
+	limiteRespostaPadrao = int64(2 << 20)  // 2 MB para listagens e texto
+	limiteRespostaImagem = int64(20 << 20) // 20 MB para geração de imagem em base64
+	maxPaginasAnthropic  = 20
+)
 
 // PNG com um círculo azul sobre fundo branco para respostas previsíveis do conector simulado.
 var pngAzulSimulado = func() string {
@@ -134,7 +140,7 @@ func (c *conectorOpenAI) listarModelos(ctx context.Context) ([]string, error) {
 			ID string `json:"id"`
 		} `json:"data"`
 	}
-	if err := fazerPedidoJSON(ctx, c.cliente, http.MethodGet, c.endereco+"/models", c.cabecalhos(), nil, &resp); err != nil {
+	if err := fazerPedidoJSON(ctx, c.cliente, http.MethodGet, c.endereco+"/models", c.cabecalhos(), nil, &resp, limiteRespostaPadrao); err != nil {
 		return nil, err
 	}
 	return extrairIDsModelos(len(resp.Data), func(i int) string { return resp.Data[i].ID }), nil
@@ -156,7 +162,7 @@ func (c *conectorOpenAI) gerarTexto(ctx context.Context, modelo, prompt string) 
 			CompletionTokens int `json:"completion_tokens"`
 		} `json:"usage"`
 	}
-	if err := fazerPedidoJSON(ctx, c.cliente, http.MethodPost, c.endereco+"/chat/completions", c.cabecalhos(), corpo, &resp); err != nil {
+	if err := fazerPedidoJSON(ctx, c.cliente, http.MethodPost, c.endereco+"/chat/completions", c.cabecalhos(), corpo, &resp, limiteRespostaPadrao); err != nil {
 		return respostaTextoIA{}, err
 	}
 	if len(resp.Choices) == 0 {
@@ -171,10 +177,13 @@ func (c *conectorOpenAI) gerarTexto(ctx context.Context, modelo, prompt string) 
 
 func (c *conectorOpenAI) gerarImagem(ctx context.Context, modelo, prompt string) (respostaImagemIA, error) {
 	corpo := map[string]any{
-		"model":           modelo,
-		"prompt":          prompt,
-		"n":               1,
-		"response_format": "b64_json",
+		"model":  modelo,
+		"prompt": prompt,
+		"n":      1,
+	}
+	// Modelos gpt-image-* já devolvem b64_json por padrão e recusam o parâmetro response_format.
+	if !strings.HasPrefix(strings.ToLower(modelo), "gpt-image-") {
+		corpo["response_format"] = "b64_json"
 	}
 	var resp struct {
 		Data []struct {
@@ -185,14 +194,22 @@ func (c *conectorOpenAI) gerarImagem(ctx context.Context, modelo, prompt string)
 			OutputTokens int `json:"output_tokens"`
 		} `json:"usage"`
 	}
-	if err := fazerPedidoJSON(ctx, c.cliente, http.MethodPost, c.endereco+"/images/generations", c.cabecalhos(), corpo, &resp); err != nil {
+	if err := fazerPedidoJSON(ctx, c.cliente, http.MethodPost, c.endereco+"/images/generations", c.cabecalhos(), corpo, &resp, limiteRespostaImagem); err != nil {
 		return respostaImagemIA{}, err
 	}
 	if len(resp.Data) == 0 || resp.Data[0].B64JSON == "" {
 		return respostaImagemIA{}, &erroFornecedor{codigo: "fornecedor_erro", mensagem: "O fornecedor não retornou nenhuma imagem."}
 	}
+	brutoImg, err := base64.StdEncoding.DecodeString(resp.Data[0].B64JSON)
+	if err != nil || len(brutoImg) == 0 {
+		return respostaImagemIA{}, &erroFornecedor{codigo: "fornecedor_erro", mensagem: "O fornecedor retornou uma imagem inválida."}
+	}
+	mime := http.DetectContentType(brutoImg)
+	if mime != "image/png" && mime != "image/jpeg" && mime != "image/webp" {
+		return respostaImagemIA{}, &erroFornecedor{codigo: "fornecedor_erro", mensagem: "O fornecedor retornou um formato de imagem não aceito."}
+	}
 	return respostaImagemIA{
-		ImagemDataUrl: "data:image/png;base64," + resp.Data[0].B64JSON,
+		ImagemDataUrl: "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(brutoImg),
 		TokensEntrada: resp.Usage.InputTokens,
 		TokensSaida:   resp.Usage.OutputTokens,
 		Imagens:       len(resp.Data),
@@ -215,15 +232,45 @@ func (c *conectorAnthropic) cabecalhos() map[string]string {
 }
 
 func (c *conectorAnthropic) listarModelos(ctx context.Context) ([]string, error) {
-	var resp struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
+	vistos := map[string]bool{}
+	var todos []string
+	afterID := ""
+
+	for pagina := 0; pagina < maxPaginasAnthropic; pagina++ {
+		urlDestino := c.endereco + "/models?limit=1000"
+		if afterID != "" {
+			urlDestino += "&after_id=" + url.QueryEscape(afterID)
+		}
+		var resp struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+			HasMore bool   `json:"has_more"`
+			LastID  string `json:"last_id"`
+		}
+		if err := fazerPedidoJSON(ctx, c.cliente, http.MethodGet, urlDestino, c.cabecalhos(), nil, &resp, limiteRespostaPadrao); err != nil {
+			return nil, err
+		}
+		for _, item := range resp.Data {
+			id := strings.TrimSpace(item.ID)
+			if id != "" && !vistos[id] {
+				vistos[id] = true
+				todos = append(todos, id)
+			}
+		}
+		if !resp.HasMore {
+			break
+		}
+		proximo := strings.TrimSpace(resp.LastID)
+		if proximo == "" && len(resp.Data) > 0 {
+			proximo = strings.TrimSpace(resp.Data[len(resp.Data)-1].ID)
+		}
+		if proximo == "" || proximo == afterID {
+			break
+		}
+		afterID = proximo
 	}
-	if err := fazerPedidoJSON(ctx, c.cliente, http.MethodGet, c.endereco+"/models", c.cabecalhos(), nil, &resp); err != nil {
-		return nil, err
-	}
-	return extrairIDsModelos(len(resp.Data), func(i int) string { return resp.Data[i].ID }), nil
+	return todos, nil
 }
 
 func (c *conectorAnthropic) gerarTexto(ctx context.Context, modelo, prompt string) (respostaTextoIA, error) {
@@ -242,7 +289,7 @@ func (c *conectorAnthropic) gerarTexto(ctx context.Context, modelo, prompt strin
 			OutputTokens int `json:"output_tokens"`
 		} `json:"usage"`
 	}
-	if err := fazerPedidoJSON(ctx, c.cliente, http.MethodPost, c.endereco+"/messages", c.cabecalhos(), corpo, &resp); err != nil {
+	if err := fazerPedidoJSON(ctx, c.cliente, http.MethodPost, c.endereco+"/messages", c.cabecalhos(), corpo, &resp, limiteRespostaPadrao); err != nil {
 		return respostaTextoIA{}, err
 	}
 	var partes []string
@@ -286,7 +333,7 @@ func extrairIDsModelos(total int, pegar func(int) string) []string {
 
 // fazerPedidoJSON executa uma chamada JSON para fornecedores externos e traduz falhas
 // para códigos estáveis, sem nunca expor chaves nem o corpo bruto de erro do fornecedor.
-func fazerPedidoJSON(ctx context.Context, cliente *http.Client, metodo, urlDestino string, cabecalhos map[string]string, corpo any, destino any) error {
+func fazerPedidoJSON(ctx context.Context, cliente *http.Client, metodo, urlDestino string, cabecalhos map[string]string, corpo any, destino any, limiteBytes int64) error {
 	if cliente == nil {
 		return errors.New("cliente HTTP não configurado")
 	}
@@ -319,12 +366,17 @@ func fazerPedidoJSON(ctx context.Context, cliente *http.Client, metodo, urlDesti
 	}
 	defer res.Body.Close()
 
-	// Limita a leitura da resposta a 2 MB.
-	dados, err := io.ReadAll(io.LimitReader(res.Body, 2<<20))
+	dados, err := io.ReadAll(io.LimitReader(res.Body, limiteBytes+1))
 	if err != nil {
 		return &erroFornecedor{
 			codigo:   "fornecedor_indisponivel",
 			mensagem: "A resposta do fornecedor foi interrompida antes de terminar.",
+		}
+	}
+	if int64(len(dados)) > limiteBytes {
+		return &erroFornecedor{
+			codigo:   "fornecedor_erro",
+			mensagem: "resposta do fornecedor maior que o permitido",
 		}
 	}
 

@@ -61,10 +61,23 @@ func TestAC38LerModelosOpenAIAnthropicESimulado(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/v1/models" && r.Method == http.MethodGet {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": []map[string]string{{"id": "claude-sonnet-4-5"}},
-			})
-			return
+			after := r.URL.Query().Get("after_id")
+			if after == "" {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"data":     []map[string]string{{"id": "claude-sonnet-4-5"}},
+					"has_more": true,
+					"last_id":  "claude-sonnet-4-5",
+				})
+				return
+			}
+			if after == "claude-sonnet-4-5" {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"data":     []map[string]string{{"id": "claude-haiku-4-5"}},
+					"has_more": false,
+					"last_id":  "claude-haiku-4-5",
+				})
+				return
+			}
 		}
 		w.WriteHeader(http.StatusNotFound)
 	}))
@@ -142,8 +155,9 @@ func TestAC38LerModelosOpenAIAnthropicESimulado(t *testing.T) {
 	if st := c.pedir("POST", "/api/admin/fornecedores/"+fornAnt.ID+"/ler-modelos", nil, &lidos); st != 200 {
 		t.Fatalf("ler-modelos Anthropic esperava 200, veio %d", st)
 	}
-	if apiKeyAnthropic != chaveAPINovaTeste || versaoHeader != versaoAnthropic || len(lidos.Modelos) != 1 || lidos.Modelos[0].Identificador != "claude-sonnet-4-5" {
-		t.Fatalf("Anthropic inesperado: key=%q ver=%q modelos=%+v", apiKeyAnthropic, versaoHeader, lidos.Modelos)
+	if apiKeyAnthropic != chaveAPINovaTeste || versaoHeader != versaoAnthropic || len(lidos.Modelos) != 2 ||
+		lidos.Modelos[0].Identificador != "claude-sonnet-4-5" || lidos.Modelos[1].Identificador != "claude-haiku-4-5" {
+		t.Fatalf("Anthropic paginado inesperado: key=%q ver=%q modelos=%+v", apiKeyAnthropic, versaoHeader, lidos.Modelos)
 	}
 
 	modoAnthropic.Store(1)
@@ -231,18 +245,68 @@ func TestConectoresGeracaoTextoEImagem(t *testing.T) {
 		t.Fatal("modelo simulado com 'falha' deveria falhar na imagem")
 	}
 
-	// OpenAI TLS mock para chat/completions e images/generations.
+	// OpenAI TLS mock para chat/completions, images/generations e limites de resposta.
+	var paginasInfinitas atomic.Int32
 	srvOAI := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/chat/completions":
+			if r.URL.Query().Get("grande") == "1" {
+				// > 2 MB para texto deve ser recusado.
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"` + strings.Repeat("a", int(limiteRespostaPadrao)+100) + `"}}]}`))
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"choices": []map[string]any{{"message": map[string]string{"content": "Sou gpt-4o"}}},
 				"usage":   map[string]int{"prompt_tokens": 10, "completion_tokens": 25},
 			})
 		case "/v1/images/generations":
+			var reqBody map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&reqBody)
+			prompt, _ := reqBody["prompt"].(string)
+			modeloReq, _ := reqBody["model"].(string)
+			_, temResponseFormat := reqBody["response_format"]
+			if strings.HasPrefix(modeloReq, "gpt-image-") && temResponseFormat {
+				w.WriteHeader(400)
+				return
+			}
+			if !strings.HasPrefix(modeloReq, "gpt-image-") && reqBody["response_format"] != "b64_json" {
+				w.WriteHeader(400)
+				return
+			}
+			switch prompt {
+			case "nao-imagem":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"data": []map[string]string{{"b64_json": base64.StdEncoding.EncodeToString([]byte("<html>nao-e-imagem</html>"))}},
+				})
+				return
+			case "jpeg":
+				// Cabeçalho JPEG mínimo (SOI + APP0) para detecção de image/jpeg.
+				jpegBytes := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xff, 0xd9}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"data": []map[string]string{{"b64_json": base64.StdEncoding.EncodeToString(jpegBytes)}},
+				})
+				return
+			case "grande-ok":
+				// > 2 MB (e < 20 MB): PNG válido com padding > 2.2 MB para provar que imagem aceita até 20 MB.
+				pngGrande := append(append([]byte(nil), pngMinimo...), bytes.Repeat([]byte{0x00}, 2300*1024)...)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"data": []map[string]string{{"b64_json": base64.StdEncoding.EncodeToString(pngGrande)}},
+				})
+				return
+			case "maior-20mb":
+				_, _ = w.Write([]byte(`{"data":[{"b64_json":"` + strings.Repeat("A", int(limiteRespostaImagem)+100) + `"}]}`))
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"data":  []map[string]string{{"b64_json": imgBase64}},
 				"usage": map[string]int{"input_tokens": 5, "output_tokens": 0},
+			})
+		case "/v1/models":
+			p := paginasInfinitas.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data":     []map[string]string{{"id": "claude-pag-" + string(rune('a'+p%26))}},
+				"has_more": true,
+				"last_id":  "id-" + string(rune('a'+p%26)),
 			})
 		default:
 			w.WriteHeader(404)
@@ -258,9 +322,44 @@ func TestConectoresGeracaoTextoEImagem(t *testing.T) {
 	if err != nil || rtOAI.Texto != "Sou gpt-4o" || rtOAI.TokensEntrada != 10 || rtOAI.TokensSaida != 25 {
 		t.Fatalf("OpenAI gerarTexto inesperado: %+v err=%v", rtOAI, err)
 	}
+	// gpt-image-* não envia response_format; dall-e-3 envia b64_json.
 	riOAI, err := conOAI.gerarImagem(ctx, "gpt-image-1", "círculo")
 	if err != nil || riOAI.ImagemDataUrl != "data:image/png;base64,"+imgBase64 || riOAI.Imagens != 1 || riOAI.TokensEntrada != 5 {
-		t.Fatalf("OpenAI gerarImagem inesperado: %+v err=%v", riOAI, err)
+		t.Fatalf("OpenAI gpt-image-1 gerarImagem inesperado: %+v err=%v", riOAI, err)
+	}
+	riDalle, err := conOAI.gerarImagem(ctx, "dall-e-3", "jpeg")
+	if err != nil || !strings.HasPrefix(riDalle.ImagemDataUrl, "data:image/jpeg;base64,") {
+		t.Fatalf("OpenAI dall-e-3 JPEG inesperado: %+v err=%v", riDalle, err)
+	}
+	// Imagem > 2 MB (<= 20 MB) é aceita.
+	if riGrande, err := conOAI.gerarImagem(ctx, "gpt-image-1", "grande-ok"); err != nil || !strings.HasPrefix(riGrande.ImagemDataUrl, "data:image/png;base64,") {
+		t.Fatalf("imagem > 2MB e <= 20MB deveria passar, veio err=%v", err)
+	}
+	// Imagem > 20 MB devolve fornecedor_erro com mensagem exata.
+	var efImg *erroFornecedor
+	if _, err := conOAI.gerarImagem(ctx, "gpt-image-1", "maior-20mb"); !errors.As(err, &efImg) || efImg.codigo != "fornecedor_erro" || efImg.mensagem != "resposta do fornecedor maior que o permitido" {
+		t.Fatalf("imagem > 20MB esperava erro de tamanho, veio %v", err)
+	}
+	// Conteúdo decodificado não-imagem (HTML) é recusado.
+	if _, err := conOAI.gerarImagem(ctx, "gpt-image-1", "nao-imagem"); !errors.As(err, &efImg) || efImg.codigo != "fornecedor_erro" {
+		t.Fatalf("b64_json não-imagem deveria ser recusado, veio %v", err)
+	}
+	// Texto > 2 MB é recusado com mensagem exata.
+	conTextoGrande := &conectorOpenAI{endereco: srvOAI.URL + "/v1/chat/completions?grande=1", chave: chaveAPITeste, cliente: srvOAI.Client()}
+	var respDummy map[string]any
+	if err := fazerPedidoJSON(ctx, conTextoGrande.cliente, http.MethodPost, conTextoGrande.endereco, nil, map[string]string{}, &respDummy, limiteRespostaPadrao); !errors.As(err, &efImg) || efImg.codigo != "fornecedor_erro" || efImg.mensagem != "resposta do fornecedor maior que o permitido" {
+		t.Fatalf("resposta > 2MB esperava erro de tamanho, veio %v", err)
+	}
+	// Anthropic para no teto de 20 páginas.
+	conPag, _ := novoConector("anthropic", srvOAI.URL+"/v1", chaveAPITeste, srvOAI.Client())
+	if _, err := conPag.listarModelos(ctx); err != nil {
+		t.Fatalf("paginação Anthropic até teto falhou: %v", err)
+	}
+	if paginasInfinitas.Load() != maxPaginasAnthropic {
+		t.Fatalf("esperava teto de %d páginas, consultou %d", maxPaginasAnthropic, paginasInfinitas.Load())
+	}
+	if timeoutImagem != 120*time.Second {
+		t.Fatalf("timeoutImagem esperado 120s, veio %v", timeoutImagem)
 	}
 
 	// Anthropic TLS mock: texto ok; imagem recusada.
@@ -457,5 +556,51 @@ func TestModelosEPrecosRegrasEVigencia(t *testing.T) {
 		gotTxt.PrecosVigentes.TokenSaida == nil || *gotTxt.PrecosVigentes.TokenSaida != 0 ||
 		gotTxt.PrecosVigentes.Imagem != nil {
 		t.Fatalf("preços vigentes de texto inesperados: %+v", gotTxt.PrecosVigentes)
+	}
+
+	// Preço: recusa unidade que não combina com o serviço do modelo (400 formato_invalido);
+	// modelo de imagem aceita token_entrada além de imagem.
+	if st, body := c.pedirComCorpo("POST", "/api/admin/modelos/"+modTexto.ID+"/precos", map[string]any{
+		"unidade": "imagem", "precoUsd": 0.1, "vigenciaInicio": "2026-11-25",
+	}); st != 400 || !strings.Contains(string(body), "formato_invalido") {
+		t.Fatalf("unidade imagem em modelo texto esperava 400 formato_invalido, veio %d (%s)", st, body)
+	}
+	if st, body := c.pedirComCorpo("POST", "/api/admin/modelos/"+modImg.ID+"/precos", map[string]any{
+		"unidade": "token_saida", "precoUsd": 0.1, "vigenciaInicio": "2026-11-25",
+	}); st != 400 || !strings.Contains(string(body), "formato_invalido") {
+		t.Fatalf("unidade token_saida em modelo imagem esperava 400 formato_invalido, veio %d (%s)", st, body)
+	}
+	if st := c.pedir("POST", "/api/admin/modelos/"+modImg.ID+"/precos", map[string]any{
+		"unidade": "token_entrada", "precoUsd": 2.0, "vigenciaInicio": "2026-11-25",
+	}, nil); st != 201 {
+		t.Fatalf("modelo imagem deveria aceitar token_entrada, veio %d", st)
+	}
+
+	// Modelo SEM limite próprio (modImg) usa o gasto do fornecedor inteiro contra o limite do fornecedor (50.00, aviso 80% = 40.00).
+	// modTexto já gastou 6.00; somando 35.00 em modTexto -> fornecedor gasta 41.00 (>= 80% de 50.00).
+	if _, err := api.banco.Exec(context.Background(), `
+		INSERT INTO ia_execucoes (correlacao_id, atividade, fornecedor_id, modelo_id, fornecedor_nome, modelo_identificador, status, custo_usd, criado_em)
+		VALUES (gen_random_uuid(), 'teste', $1, $2, $3, $4, 'ok', 35.00, $5)`,
+		fornSim.ID, modTexto.ID, fornSim.Nome, modTexto.Identificador, agoraFixo); err != nil {
+		t.Fatal(err)
+	}
+	if st := c.pedir("GET", "/api/admin/fornecedores/"+fornSim.ID+"/modelos", nil, &listaMod); st != 200 {
+		t.Fatalf("GET modelos falhou: %d", st)
+	}
+	gotImg = listaMod.Modelos[0]
+	if gotImg.GastoMesUsd != 0 || gotImg.Situacao != "aviso" {
+		t.Fatalf("modelo sem limite próprio esperava gastoMesUsd=0 e situacao=aviso pelo gasto do fornecedor, veio %+v", gotImg)
+	}
+
+	// PATCH do modelo recusa troca de serviço se estiver em uso em alguma atividade (409 servico_incompativel).
+	if st := c.pedir("PUT", "/api/admin/atividades/imagem", map[string]any{
+		"modeloPrincipalId": modImg.ID, "modeloReservaId": nil,
+	}, nil); st != 200 {
+		t.Fatalf("PUT atividade imagem falhou: %d", st)
+	}
+	if st, body := c.pedirComCorpo("PATCH", "/api/admin/modelos/"+modImg.ID, map[string]any{
+		"servico": "texto",
+	}); st != 409 || !strings.Contains(string(body), "servico_incompativel") || !strings.Contains(string(body), "Imagem") {
+		t.Fatalf("trocar serviço de modelo em uso esperava 409 servico_incompativel citando Imagem, veio %d (%s)", st, body)
 	}
 }

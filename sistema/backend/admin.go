@@ -85,22 +85,43 @@ type PedidoEditarFornecedor struct {
 	Ativo           *bool    `json:"ativo"`
 }
 
+type chaveSessaoAdmin struct{}
+
+func sessaoDoAdmin(r *http.Request) contextoSessao {
+	s, _ := r.Context().Value(chaveSessaoAdmin{}).(contextoSessao)
+	return s
+}
+
 func (a *API) rotasAdmin(m *http.ServeMux) {
-	m.HandleFunc("GET /api/admin/fornecedores", a.comAdmin(a.listarFornecedores))
-	m.HandleFunc("POST /api/admin/fornecedores", a.comAdmin(a.criarFornecedor))
-	m.HandleFunc("PATCH /api/admin/fornecedores/{id}", a.comAdmin(a.editarFornecedor))
-	m.HandleFunc("POST /api/admin/fornecedores/{id}/ler-modelos", a.comAdmin(a.lerModelosFornecedor))
-	m.HandleFunc("GET /api/admin/fornecedores/{id}/modelos", a.comAdmin(a.listarModelos))
-	m.HandleFunc("POST /api/admin/fornecedores/{id}/modelos", a.comAdmin(a.criarModelo))
-	m.HandleFunc("PATCH /api/admin/modelos/{id}", a.comAdmin(a.editarModelo))
-	m.HandleFunc("GET /api/admin/modelos/{id}/precos", a.comAdmin(a.listarPrecos))
-	m.HandleFunc("POST /api/admin/modelos/{id}/precos", a.comAdmin(a.criarPreco))
-	m.HandleFunc("POST /api/admin/modelos/{id}/testar", a.comAdmin(a.testarModelo))
-	m.HandleFunc("GET /api/admin/atividades", a.comAdmin(a.listarAtividades))
-	m.HandleFunc("PUT /api/admin/atividades/{atividade}", a.comAdmin(a.salvarRotaAtividade))
-	m.HandleFunc("POST /api/admin/atividades/{atividade}/testar", a.comAdmin(a.testarAtividade))
-	m.HandleFunc("GET /api/admin/execucoes", a.comAdmin(a.listarExecucoes))
-	m.HandleFunc("GET /api/admin/avisos", a.comAdmin(a.listarAvisos))
+	adminMux := http.NewServeMux()
+	com := func(h manipulador) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			h(w, r, sessaoDoAdmin(r))
+		}
+	}
+	adminMux.HandleFunc("GET /api/admin/fornecedores", com(a.listarFornecedores))
+	adminMux.HandleFunc("POST /api/admin/fornecedores", com(a.criarFornecedor))
+	adminMux.HandleFunc("PATCH /api/admin/fornecedores/{id}", com(a.editarFornecedor))
+	adminMux.HandleFunc("POST /api/admin/fornecedores/{id}/ler-modelos", com(a.lerModelosFornecedor))
+	adminMux.HandleFunc("GET /api/admin/fornecedores/{id}/modelos", com(a.listarModelos))
+	adminMux.HandleFunc("POST /api/admin/fornecedores/{id}/modelos", com(a.criarModelo))
+	adminMux.HandleFunc("PATCH /api/admin/modelos/{id}", com(a.editarModelo))
+	adminMux.HandleFunc("GET /api/admin/modelos/{id}/precos", com(a.listarPrecos))
+	adminMux.HandleFunc("POST /api/admin/modelos/{id}/precos", com(a.criarPreco))
+	adminMux.HandleFunc("POST /api/admin/modelos/{id}/testar", com(a.testarModelo))
+	adminMux.HandleFunc("GET /api/admin/atividades", com(a.listarAtividades))
+	adminMux.HandleFunc("PUT /api/admin/atividades/{atividade}", com(a.salvarRotaAtividade))
+	adminMux.HandleFunc("POST /api/admin/atividades/{atividade}/testar", com(a.testarAtividade))
+	adminMux.HandleFunc("GET /api/admin/execucoes", com(a.listarExecucoes))
+	adminMux.HandleFunc("GET /api/admin/avisos", com(a.listarAvisos))
+
+	// Qualquer rota ou método sob /api/admin/* exige admin_plataforma antes de 404/405 (AC30).
+	despacharAdmin := a.comAdmin(func(w http.ResponseWriter, r *http.Request, s contextoSessao) {
+		r = r.WithContext(context.WithValue(r.Context(), chaveSessaoAdmin{}, s))
+		adminMux.ServeHTTP(w, r)
+	})
+	m.HandleFunc("/api/admin/", despacharAdmin)
+	m.HandleFunc("/api/admin", despacharAdmin)
 }
 
 // comAdmin exige sessão válida e confere admin_plataforma no banco a cada pedido (AC30, AC37).
@@ -182,13 +203,9 @@ func (a *API) criarFornecedor(w http.ResponseWriter, r *http.Request, _ contexto
 	var chaveCifrada []byte
 	var chaveFinal *string
 	if p.Tipo != "simulado" {
-		chave := strings.TrimSpace(p.Chave)
-		if chave == "" {
-			erro(w, 400, "chave_obrigatoria", "Informe a chave de API.")
-			return
-		}
-		if utf8.RuneCountInString(chave) > 500 {
-			erro(w, 400, "dados_invalidos", "A chave pode ter no máximo 500 caracteres.")
+		chave, cod, msg := validarChaveAPI(p.Chave, true)
+		if cod != "" {
+			erro(w, 400, cod, msg)
 			return
 		}
 		if a.cifrador == nil {
@@ -272,13 +289,9 @@ func (a *API) editarFornecedor(w http.ResponseWriter, r *http.Request, _ context
 			erro(w, 400, "dados_invalidos", "Fornecedor simulado não usa chave de API.")
 			return
 		}
-		chave := strings.TrimSpace(*p.Chave)
-		if chave == "" {
-			erro(w, 400, "dados_invalidos", "Informe a chave de API.")
-			return
-		}
-		if utf8.RuneCountInString(chave) > 500 {
-			erro(w, 400, "dados_invalidos", "A chave pode ter no máximo 500 caracteres.")
+		chave, cod, msg := validarChaveAPI(*p.Chave, false)
+		if cod != "" {
+			erro(w, 400, cod, msg)
 			return
 		}
 		if a.cifrador == nil {
@@ -435,6 +448,28 @@ func validarNomeFornecedor(bruto string) (string, string) {
 		return "", "O nome pode ter no máximo 100 caracteres."
 	}
 	return nome, ""
+}
+
+func validarChaveAPI(bruto string, obrigatoria bool) (chave, codigo, mensagem string) {
+	chave = strings.TrimSpace(bruto)
+	if chave == "" {
+		if obrigatoria {
+			return "", "chave_obrigatoria", "Informe a chave de API."
+		}
+		return "", "formato_invalido", "Informe uma chave de API válida."
+	}
+	for i := 0; i < len(chave); i++ {
+		if chave[i] < 0x21 || chave[i] > 0x7e {
+			return "", "formato_invalido", "A chave de API deve conter apenas caracteres ASCII visíveis, sem espaços ou quebras de linha."
+		}
+	}
+	if len(chave) < 12 {
+		return "", "formato_invalido", "A chave de API deve ter pelo menos 12 caracteres."
+	}
+	if len(chave) > 500 {
+		return "", "formato_invalido", "A chave pode ter no máximo 500 caracteres."
+	}
+	return chave, "", ""
 }
 
 func formatarLimiteUsd(v float64) (string, bool) {

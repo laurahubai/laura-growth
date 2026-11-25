@@ -17,6 +17,7 @@ import (
 const (
 	promptTesteTexto  = "Oi, qual modelo é você?"
 	promptTesteImagem = "um círculo azul sobre fundo branco"
+	timeoutImagem     = 120 * time.Second
 )
 
 type definicaoAtividade struct {
@@ -645,7 +646,11 @@ func (a *API) executarEGerar(
 		}
 	}
 
-	con, err := novoConector(cand.fornecedorTipo, endereco, chave, a.clienteHTTPFornecedor(timeoutFornecedor))
+	timeout := timeoutFornecedor
+	if cand.servico == "imagem" {
+		timeout = timeoutImagem
+	}
+	con, err := novoConector(cand.fornecedorTipo, endereco, chave, a.clienteHTTPFornecedor(timeout))
 	if err != nil {
 		_ = a.registrarTentativaSemExecucao(ctx, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", err.Error())
 		return "", nil, nil, 0, 0, 0, 0, err

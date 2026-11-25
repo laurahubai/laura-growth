@@ -19,6 +19,8 @@ type resolvedorIP func(ctx context.Context, host string) ([]netip.Addr, error)
 var (
 	errRedirecionamentoRecusado = errors.New("redirecionamentos não são permitidos")
 	errRedeInternaRecusada      = errors.New("conexão recusada: endereço de rede interna não permitido")
+	// Em produção fica nil (usa o resolvedor padrão do Go); testes podem injetar DNS de rebinding.
+	resolvedorDial *net.Resolver
 )
 
 var faixasInternas = func() []netip.Prefix {
@@ -34,10 +36,13 @@ var faixasInternas = func() []netip.Prefix {
 		"198.18.0.0/15",
 		"224.0.0.0/4",
 		"240.0.0.0/4",
-		"::/128",
+		"::/96", // IPv4-compatível em IPv6
 		"::1/128",
+		"64:ff9b::/96", // NAT64
 		"64:ff9b:1::/48",
 		"100::/64",
+		"2001::/32", // Teredo
+		"2002::/16", // 6to4
 		"fc00::/7",
 		"fe80::/10",
 		"fec0::/10",
@@ -142,7 +147,8 @@ func hostBloqueado(host string) bool {
 // (proteção contra DNS rebinding), exige TLS >= 1.2 e recusa redirecionamentos (AC39).
 func novoClienteSeguro(timeout time.Duration) *http.Client {
 	dialer := &net.Dialer{
-		Timeout: timeout,
+		Timeout:  timeout,
+		Resolver: resolvedorDial,
 		Control: func(_, address string, _ syscall.RawConn) error {
 			ap, err := netip.ParseAddrPort(address)
 			if err != nil {
