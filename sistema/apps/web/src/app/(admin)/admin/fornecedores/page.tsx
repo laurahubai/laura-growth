@@ -314,6 +314,7 @@ function GavetaNovoFornecedor({ aoFechar }: { aoFechar: () => void }) {
                 autoComplete="new-password"
                 data-1p-ignore
                 data-lpignore="true"
+                data-bwignore
                 data-form-type="other"
                 aria-invalid={!!errors.chave}
                 {...register("chave")}
@@ -535,6 +536,7 @@ function GavetaEditarFornecedor({ fornecedor, aoFechar }: { fornecedor: Forneced
                 autoComplete="new-password"
                 data-1p-ignore
                 data-lpignore="true"
+                data-bwignore
                 data-form-type="other"
                 placeholder="Deixe vazio para manter a chave atual"
                 aria-invalid={!!errors.chave}

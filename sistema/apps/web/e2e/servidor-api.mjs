@@ -31,8 +31,31 @@ function carregarEnv() {
   return env;
 }
 
+function exigirBancoE2E(urlBruta) {
+  const valor = (urlBruta ?? "").trim();
+  if (!valor) {
+    console.error("LG_E2E_BANCO_URL não definida; configure um banco exclusivo terminado em _teste ou _e2e.");
+    process.exit(1);
+  }
+  let parsed;
+  try {
+    parsed = new URL(valor);
+  } catch {
+    console.error("LG_E2E_BANCO_URL inválida.");
+    process.exit(1);
+  }
+  const nomeBanco = parsed.pathname.replace(/^\/+/, "");
+  if (!nomeBanco.endsWith("_teste") && !nomeBanco.endsWith("_e2e")) {
+    console.error(`Recusado: o banco E2E (${nomeBanco || "vazio"}) precisa terminar com _teste ou _e2e.`);
+    process.exit(1);
+  }
+  return valor;
+}
+
 const backendDir = path.resolve(dirAtual, "../../../backend");
 const env = carregarEnv();
+const bancoE2E = exigirBancoE2E(env.LG_E2E_BANCO_URL);
+env.LG_BANCO_URL = bancoE2E;
 
 execFileSync("go", ["run", ".", "migrar"], { cwd: backendDir, env, stdio: "inherit" });
 execFileSync("go", ["run", ".", "semear"], { cwd: backendDir, env, stdio: "inherit" });

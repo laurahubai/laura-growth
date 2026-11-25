@@ -1,14 +1,15 @@
 //go:build ignore
 
-// Utilitário exclusivo para preparação do banco nos testes E2E (Playwright).
-// Cria/atualiza um usuário comum (admin_plataforma = false) e um fornecedor OpenAI
-// inativo para validar os campos de chave na interface sem chamadas externas.
+// Utilitário exclusivo para preparação e limpeza do banco nos testes E2E (Playwright).
+// Exige LG_E2E_BANCO_URL apontando para um banco cujo nome termine com _teste ou _e2e.
+// Uso: go run ./e2e_apoio.go [preparar|limpar]
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -17,12 +18,37 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+func validarBancoE2E(raw string) (string, error) {
+	u := strings.TrimSpace(raw)
+	if u == "" {
+		return "", errors.New("defina LG_E2E_BANCO_URL com um banco terminado em _teste ou _e2e")
+	}
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return "", fmt.Errorf("LG_E2E_BANCO_URL inválida: %w", err)
+	}
+	nome := strings.TrimPrefix(parsed.Path, "/")
+	if !strings.HasSuffix(nome, "_teste") && !strings.HasSuffix(nome, "_e2e") {
+		return "", fmt.Errorf("recusado: o banco E2E (%q) precisa terminar com _teste ou _e2e", nome)
+	}
+	return u, nil
+}
+
 func main() {
-	bancoURL := os.Getenv("LG_BANCO_URL")
+	bancoURL, err := validarBancoE2E(os.Getenv("LG_E2E_BANCO_URL"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+
+	acao := "preparar"
+	if len(os.Args) > 1 {
+		acao = os.Args[1]
+	}
+
 	email := strings.TrimSpace(os.Getenv("LG_E2E_OPERACAO_EMAIL"))
-	senha := os.Getenv("LG_E2E_OPERACAO_SENHA")
-	if bancoURL == "" || email == "" || senha == "" {
-		fmt.Fprintln(os.Stderr, "defina LG_BANCO_URL, LG_E2E_OPERACAO_EMAIL e LG_E2E_OPERACAO_SENHA")
+	if email == "" {
+		fmt.Fprintln(os.Stderr, "defina LG_E2E_OPERACAO_EMAIL")
 		os.Exit(2)
 	}
 
@@ -33,6 +59,25 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+
+	switch acao {
+	case "limpar":
+		if _, err := pool.Exec(ctx, `DELETE FROM usuarios WHERE lower(email) = lower($1)`, email); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao limpar usuário de teste: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	case "preparar":
+	default:
+		fmt.Fprintf(os.Stderr, "ação desconhecida: %s\n", acao)
+		os.Exit(2)
+	}
+
+	senha := os.Getenv("LG_E2E_OPERACAO_SENHA")
+	if len(senha) < 10 {
+		fmt.Fprintln(os.Stderr, "defina LG_E2E_OPERACAO_SENHA com pelo menos 10 caracteres")
+		os.Exit(2)
+	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(senha), 12)
 	if err != nil {

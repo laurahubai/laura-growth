@@ -745,3 +745,55 @@ func TestLimiteMensalUsaRelogioDaAplicacaoNaGravacao(t *testing.T) {
 		t.Fatalf("2a chamada no mesmo mês de a.agora() esperava 409 limite_atingido, veio %d (%s)", st, body)
 	}
 }
+
+func TestGravacaoExecucaoSobreviveCancelamentoDoCliente(t *testing.T) {
+	api := novaAPIAdminTeste(t)
+	c := novoCliente(t, api)
+	entrarComoPaulo(t, c)
+
+	_, modTxt, _, _, _, _ := prepararSimuladosCompletos(t, c)
+	cand, err := api.buscarCandidato(context.Background(), modTxt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hoje := time.Now().In(fusoSaoPaulo).Format("2006-01-02")
+	precos, err := api.carregarPrecosVigentesTexto(context.Background(), modTxt, hoje)
+	if err != nil {
+		t.Fatal(err)
+	}
+	correlacaoID, err := novoUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancelar := context.WithCancel(context.Background())
+	defer cancelar()
+	var chamadasRelogio atomic.Int32
+	api.agora = func() time.Time {
+		if chamadasRelogio.Add(1) == 2 {
+			// Simula desconexão do cliente logo após a resposta do fornecedor e antes da gravação no banco.
+			cancelar()
+		}
+		return time.Now()
+	}
+
+	res, err := api.executarComTrava(ctx, cand, precos, correlacaoID, "teste", "", "", 1, false, promptTesteTexto, false)
+	if err != nil {
+		t.Fatalf("executarComTrava deveria gravar mesmo com cliente desconectado: %v", err)
+	}
+	if res.execucaoID == "" {
+		t.Fatal("esperava execucaoID preenchido")
+	}
+
+	var status string
+	var tokensIn, tokensOut int
+	var custo float64
+	if err := api.banco.QueryRow(context.Background(), `
+		SELECT status, tokens_entrada, tokens_saida, custo_usd::float8
+		FROM ia_execucoes WHERE id::text = $1`, res.execucaoID).Scan(&status, &tokensIn, &tokensOut, &custo); err != nil {
+		t.Fatalf("registro de execução não foi persistido após cancelamento do cliente: %v", err)
+	}
+	if status != "ok" || tokensIn != 12 || tokensOut != 18 || custo <= 0 {
+		t.Fatalf("dados inesperados no registro gravado: status=%s in=%d out=%d custo=%v", status, tokensIn, tokensOut, custo)
+	}
+}

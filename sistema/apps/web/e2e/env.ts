@@ -28,3 +28,25 @@ export function carregarEnvSistema(): Record<string, string> {
   }
   return env;
 }
+
+export function validarBancoE2E(urlBruta: string | undefined): string {
+  const valor = (urlBruta ?? "").trim();
+  if (!valor) {
+    throw new Error(
+      "LG_E2E_BANCO_URL não definida; configure um banco exclusivo terminado em _teste ou _e2e.",
+    );
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(valor);
+  } catch {
+    throw new Error("LG_E2E_BANCO_URL inválida.");
+  }
+  const nomeBanco = parsed.pathname.replace(/^\/+/, "");
+  if (!nomeBanco.endsWith("_teste") && !nomeBanco.endsWith("_e2e")) {
+    throw new Error(
+      `Recusado: o banco E2E (${nomeBanco || "vazio"}) precisa terminar com _teste ou _e2e.`,
+    );
+  }
+  return valor;
+}

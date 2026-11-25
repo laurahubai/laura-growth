@@ -16,10 +16,21 @@ import (
 )
 
 const (
-	promptTesteTexto  = "Oi, qual modelo é você?"
-	promptTesteImagem = "um círculo azul sobre fundo branco"
-	timeoutImagem     = 120 * time.Second
+	promptTesteTexto        = "Oi, qual modelo é você?"
+	promptTesteImagem       = "um círculo azul sobre fundo branco"
+	timeoutImagem           = 120 * time.Second
+	timeoutGravacaoExecucao = 5 * time.Second
 )
+
+func contextoGravacaoExecucao(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), timeoutGravacaoExecucao)
+}
+
+func confirmarTxExecucao(ctx context.Context, tx pgx.Tx) error {
+	ctxCommit, cancelar := contextoGravacaoExecucao(ctx)
+	defer cancelar()
+	return tx.Commit(ctxCommit)
+}
 
 type definicaoAtividade struct {
 	Codigo  string
@@ -701,9 +712,9 @@ func (a *API) executarComTrava(
 				slog.Error("falha ao registrar pulo por limite", "atividade", atividade, "modeloId", cand.modeloID, "erro", err)
 				return resultadoExecucao{}, &erroInternoExecucao{err: err}
 			}
-			if err := tx.Commit(ctx); err != nil {
-				slog.Error("falha ao confirmar pulo por limite", "atividade", atividade, "modeloId", cand.modeloID, "erro", err)
-				return resultadoExecucao{}, &erroInternoExecucao{err: err}
+			if errCommit := confirmarTxExecucao(ctx, tx); errCommit != nil {
+				slog.Error("falha ao confirmar pulo por limite", "atividade", atividade, "modeloId", cand.modeloID, "erro", errCommit)
+				return resultadoExecucao{}, &erroInternoExecucao{err: errCommit}
 			}
 		}
 		return resultadoExecucao{puladoLimite: true}, nil
@@ -717,16 +728,16 @@ func (a *API) executarComTrava(
 		if errors.As(errExec, &ei) {
 			return resultadoExecucao{}, errExec
 		}
-		if err := tx.Commit(ctx); err != nil {
-			slog.Error("falha ao confirmar registro de tentativa", "atividade", atividade, "modeloId", cand.modeloID, "erro", err)
-			return resultadoExecucao{}, &erroInternoExecucao{err: err}
+		if errCommit := confirmarTxExecucao(ctx, tx); errCommit != nil {
+			slog.Error("falha ao confirmar registro de tentativa", "atividade", atividade, "modeloId", cand.modeloID, "erro", errCommit)
+			return resultadoExecucao{}, &erroInternoExecucao{err: errCommit}
 		}
 		return resultadoExecucao{}, errExec
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		slog.Error("falha ao confirmar registro de execução", "atividade", atividade, "modeloId", cand.modeloID, "erro", err)
-		return resultadoExecucao{}, &erroInternoExecucao{err: err}
+	if errCommit := confirmarTxExecucao(ctx, tx); errCommit != nil {
+		slog.Error("falha ao confirmar registro de execução", "atividade", atividade, "modeloId", cand.modeloID, "erro", errCommit)
+		return resultadoExecucao{}, &erroInternoExecucao{err: errCommit}
 	}
 	return res, nil
 }
@@ -877,9 +888,12 @@ func (a *API) inserirExecucaoEm(
 	if usuarioID != "" {
 		userParam = &usuarioID
 	}
+	// Mantém a gravação da execução e do custo mesmo se o cliente desconectar após resposta paga do fornecedor.
+	ctxGravacao, cancelar := contextoGravacaoExecucao(ctx)
+	defer cancelar()
 	agora := a.agora()
 	var id string
-	err := exec.QueryRow(ctx, `
+	err := exec.QueryRow(ctxGravacao, `
 		INSERT INTO ia_execucoes (
 			correlacao_id, atividade, organizacao_id, usuario_id,
 			fornecedor_id, modelo_id, fornecedor_nome, modelo_identificador,

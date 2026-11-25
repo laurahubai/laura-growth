@@ -40,6 +40,8 @@ pnpm typecheck
 pnpm e2e
 ```
 
+Para `pnpm e2e`, defina `LG_E2E_BANCO_URL` no `.env` apontando para um banco exclusivo cujo nome termine com `_teste` ou `_e2e` (os testes abortam antes de iniciar se o banco não seguir essa regra, evitando alterar o banco principal). Os testes criam um usuário comum temporário com senha aleatória por execução e o removem ao final.
+
 Na primeira vez em que rodar os testes de tela, instale o navegador Chromium do Playwright:
 
 ```bash

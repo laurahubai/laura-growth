@@ -1,16 +1,18 @@
 import { execFileSync } from "node:child_process";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { carregarEnvSistema } from "./env";
+import { carregarEnvSistema, validarBancoE2E } from "./env";
 
 const dirAtual = path.dirname(fileURLToPath(import.meta.url));
 
 const envSistema = carregarEnvSistema();
+const bancoE2E = validarBancoE2E(process.env.LG_E2E_BANCO_URL || envSistema.LG_E2E_BANCO_URL);
 const adminEmail = envSistema.LG_SEMENTE_EMAIL ?? "admin-e2e@exemplo.test";
 const adminSenha = envSistema.LG_SEMENTE_SENHA ?? "";
 const operacaoEmail = "operacao-e2e@exemplo.test";
-const operacaoSenha = process.env.LG_E2E_OPERACAO_SENHA || "operacao-e2e-teste-2026";
+const operacaoSenha = process.env.LG_E2E_OPERACAO_SENHA || crypto.randomBytes(18).toString("base64url");
 
 async function entrar(page: Page, email: string, senha: string) {
   await page.goto("/entrar");
@@ -48,13 +50,28 @@ test.beforeAll(() => {
     throw new Error("LG_SEMENTE_SENHA não definida em sistema/.env");
   }
   const backendDir = path.resolve(dirAtual, "../../../backend");
-  execFileSync("go", ["run", "./e2e_apoio.go"], {
+  execFileSync("go", ["run", "./e2e_apoio.go", "preparar"], {
     cwd: backendDir,
     env: {
       ...process.env,
       ...envSistema,
+      LG_E2E_BANCO_URL: bancoE2E,
       LG_E2E_OPERACAO_EMAIL: operacaoEmail,
       LG_E2E_OPERACAO_SENHA: operacaoSenha,
+    },
+    stdio: "inherit",
+  });
+});
+
+test.afterAll(() => {
+  const backendDir = path.resolve(dirAtual, "../../../backend");
+  execFileSync("go", ["run", "./e2e_apoio.go", "limpar"], {
+    cwd: backendDir,
+    env: {
+      ...process.env,
+      ...envSistema,
+      LG_E2E_BANCO_URL: bancoE2E,
+      LG_E2E_OPERACAO_EMAIL: operacaoEmail,
     },
     stdio: "inherit",
   });
@@ -73,13 +90,14 @@ test("caminho principal da Administração de IA: fornecedor simulado, modelos, 
   await linkAdmin.click();
   await expect(page).toHaveURL(/\/admin\/fornecedores$/);
 
-  // Verifica que o campo de chave no cadastro começa vazio e usa autoComplete="new-password".
+  // Verifica que o campo de chave no cadastro começa vazio, usa autoComplete="new-password" e data-bwignore.
   await page.getByRole("button", { name: "Novo fornecedor" }).click();
   const dialogNovo = page.getByRole("dialog", { name: "Novo fornecedor" });
   await expect(dialogNovo).toBeVisible();
   const campoChaveNovo = dialogNovo.getByLabel("Chave de API");
   await expect(campoChaveNovo).toHaveValue("");
   await expect(campoChaveNovo).toHaveAttribute("autocomplete", "new-password");
+  await expect(campoChaveNovo).toHaveAttribute("data-bwignore", /^(true)?$/);
 
   // Cria o fornecedor simulado.
   await dialogNovo.getByLabel("Tipo").selectOption("simulado");
@@ -91,7 +109,7 @@ test("caminho principal da Administração de IA: fornecedor simulado, modelos, 
   await expect(linhaFornecedor).toBeVisible();
   await expect(linhaFornecedor.getByText("Simulado", { exact: true })).toBeVisible();
 
-  // Verifica que o campo "Trocar chave" ao editar fornecedor com chave começa vazio e usa autoComplete="new-password".
+  // Verifica que o campo "Trocar chave" ao editar fornecedor com chave começa vazio, usa autoComplete="new-password" e data-bwignore.
   const linhaReferencia = page
     .getByTestId("lista-fornecedores")
     .locator("tr", { hasText: "OpenAI (referência E2E)" });
@@ -102,6 +120,7 @@ test("caminho principal da Administração de IA: fornecedor simulado, modelos, 
   const campoTrocarChave = dialogEditar.getByLabel("Trocar chave");
   await expect(campoTrocarChave).toHaveValue("");
   await expect(campoTrocarChave).toHaveAttribute("autocomplete", "new-password");
+  await expect(campoTrocarChave).toHaveAttribute("data-bwignore", /^(true)?$/);
   await dialogEditar.getByRole("button", { name: "Fechar" }).click();
   await expect(dialogEditar).toBeHidden();
 
