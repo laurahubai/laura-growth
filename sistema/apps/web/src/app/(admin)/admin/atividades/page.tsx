@@ -17,7 +17,7 @@ import {
   useTestarAtividade,
   useTodosModelosAdmin,
 } from "@/lib/api";
-import { formatarUsd } from "@/lib/formato";
+import { formatarUsd, imagemDataUrlSegura } from "@/lib/formato";
 
 type SelecaoRota = { principal: string; reserva: string };
 
@@ -58,7 +58,7 @@ export default function PaginaAtividades() {
     });
   }, [atividades.data]);
 
-  if (bloqueado) return <div className="vazio" role="alert">Você não tem acesso à Administração.</div>;
+  if (bloqueado) return <div className="vazio" role="alert">{bloqueado}</div>;
 
   const fornecedoresAtivos = new Map(listaFornecedores.map((f) => [f.id, f.ativo]));
   const modelosAtivos: Modelo[] = [];
@@ -200,12 +200,20 @@ export default function PaginaAtividades() {
               {testar.data.texto !== null && <div className="legenda">{testar.data.texto}</div>}
               {testar.data.imagemDataUrl !== null && (
                 <div>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={testar.data.imagemDataUrl}
-                    alt="Imagem gerada no teste"
-                    style={{ maxWidth: 320, borderRadius: 8, border: "1px solid var(--laura-border)" }}
-                  />
+                  {imagemDataUrlSegura(testar.data.imagemDataUrl) ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={testar.data.imagemDataUrl}
+                        alt="Imagem gerada no teste"
+                        style={{ maxWidth: 320, borderRadius: 8, border: "1px solid var(--laura-border)" }}
+                      />
+                    </>
+                  ) : (
+                    <p className="small muted" role="alert" style={{ margin: 0 }}>
+                      imagem em formato não reconhecido
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -283,6 +291,8 @@ export default function PaginaAtividades() {
 
                   const salvandoEsta = salvar.isPending && salvandoAtividade === r.atividade;
                   const testandoEsta = testar.isPending && testandoAtividade === r.atividade;
+                  const alterado =
+                    sel.principal !== (r.principal?.id ?? "") || sel.reserva !== (r.reserva?.id ?? "");
 
                   return (
                     <tr key={r.atividade} data-testid={`atividade-${r.atividade}`}>
@@ -355,6 +365,7 @@ export default function PaginaAtividades() {
                               Salvo.
                             </span>
                           )}
+                          {alterado && <span className="small muted">Salve antes de testar</span>}
                         </div>
                       </td>
                       <td>
@@ -370,7 +381,8 @@ export default function PaginaAtividades() {
                           <button
                             type="button"
                             className="btn peq primario"
-                            disabled={testar.isPending}
+                            disabled={testar.isPending || alterado}
+                            title={alterado ? "Salve antes de testar" : undefined}
                             onClick={() => testarRota(r.atividade)}
                           >
                             {testandoEsta ? (

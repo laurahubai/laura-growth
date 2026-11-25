@@ -174,6 +174,7 @@ export function useFornecedoresAdmin() {
 export function useCriarFornecedor() {
   const qc = useQueryClient();
   return useMutation({
+    gcTime: 0,
     mutationFn: (p: PedidoNovoFornecedor) => chamar("POST", "/api/admin/fornecedores", Fornecedor, p),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin", "fornecedores"] });
@@ -185,6 +186,7 @@ export function useCriarFornecedor() {
 export function useEditarFornecedor() {
   const qc = useQueryClient();
   return useMutation({
+    gcTime: 0,
     mutationFn: ({ id, dados }: { id: string; dados: PedidoEditarFornecedor }) =>
       chamar("PATCH", `/api/admin/fornecedores/${encodeURIComponent(id)}`, Fornecedor, dados),
     onSuccess: () => {

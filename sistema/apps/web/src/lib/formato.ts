@@ -58,3 +58,13 @@ export function etiquetaSituacao(situacao: SituacaoLimite): { texto: string; cla
   if (situacao === "aviso") return { texto: "Aviso", classe: "t-warning" };
   return { texto: "Normal", classe: "t-success" };
 }
+
+const PREFIXOS_IMAGEM_SEGUROS = [
+  "data:image/png;base64,",
+  "data:image/jpeg;base64,",
+  "data:image/webp;base64,",
+];
+
+export function imagemDataUrlSegura(url: string): boolean {
+  return PREFIXOS_IMAGEM_SEGUROS.some((p) => url.startsWith(p));
+}

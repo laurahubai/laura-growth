@@ -33,6 +33,7 @@ import {
   formatarPrecoUsd,
   formatarUsd,
   hojeIso,
+  imagemDataUrlSegura,
 } from "@/lib/formato";
 
 function sugerirServico(identificador: string): Servico {
@@ -63,7 +64,7 @@ export default function PaginaModelosFornecedor() {
   const bloqueado = useRedirecionarSemPermissao(
     fornecedores.error || modelos.error || lerModelos.error || criarModelo.error || editarModelo.error || testar.error,
   );
-  if (bloqueado) return <div className="vazio" role="alert">Você não tem acesso à Administração.</div>;
+  if (bloqueado) return <div className="vazio" role="alert">{bloqueado}</div>;
 
   const fornecedor = fornecedores.data?.fornecedores.find((f) => f.id === fornecedorId);
   const cadastrados = new Set((modelos.data?.modelos ?? []).map((m) => m.identificador));
@@ -268,12 +269,20 @@ export default function PaginaModelosFornecedor() {
                 {testar.data.texto !== null && <div className="legenda">{testar.data.texto}</div>}
                 {testar.data.imagemDataUrl !== null && (
                   <div>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={testar.data.imagemDataUrl}
-                      alt="Imagem gerada no teste"
-                      style={{ maxWidth: 320, borderRadius: 8, border: "1px solid var(--laura-border)" }}
-                    />
+                    {imagemDataUrlSegura(testar.data.imagemDataUrl) ? (
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={testar.data.imagemDataUrl}
+                          alt="Imagem gerada no teste"
+                          style={{ maxWidth: 320, borderRadius: 8, border: "1px solid var(--laura-border)" }}
+                        />
+                      </>
+                    ) : (
+                      <p className="small muted" role="alert" style={{ margin: 0 }}>
+                        imagem em formato não reconhecido
+                      </p>
+                    )}
                   </div>
                 )}
                 <dl className="grid g4" style={{ margin: 0 }}>

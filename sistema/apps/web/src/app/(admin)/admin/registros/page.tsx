@@ -19,7 +19,7 @@ function badgeStatus(status: Execucao["status"]) {
 export default function PaginaRegistros() {
   const execucoes = useExecucoesAdmin(100);
   const bloqueado = useRedirecionarSemPermissao(execucoes.error);
-  if (bloqueado) return <div className="vazio" role="alert">Você não tem acesso à Administração.</div>;
+  if (bloqueado) return <div className="vazio" role="alert">{bloqueado}</div>;
 
   return (
     <>
@@ -89,7 +89,10 @@ export default function PaginaRegistros() {
                       {e.tokensEntrada} / {e.tokensSaida}
                     </td>
                     <td className="d">{e.imagens}</td>
-                    <td className="d">{formatarUsd(e.custoUsd)}</td>
+                    <td className="d">
+                      {formatarUsd(e.custoUsd)}
+                      {e.custoEstimado && <span className="small muted"> (estimado)</span>}
+                    </td>
                   </tr>
                 ))}
               </tbody>

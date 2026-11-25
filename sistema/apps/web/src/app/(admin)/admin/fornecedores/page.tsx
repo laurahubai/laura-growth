@@ -25,7 +25,7 @@ export default function PaginaFornecedores() {
   const [erroAcao, setErroAcao] = useState<string>("");
 
   const bloqueado = useRedirecionarSemPermissao(lista.error || editar.error);
-  if (bloqueado) return <div className="vazio" role="alert">Você não tem acesso à Administração.</div>;
+  if (bloqueado) return <div className="vazio" role="alert">{bloqueado}</div>;
 
   const alternarAtivo = (f: Fornecedor) => {
     setErroAcao("");
@@ -239,6 +239,7 @@ function GavetaNovoFornecedor({ aoFechar }: { aoFechar: () => void }) {
       onSuccess: () => {
         setValue("chave", "");
         reset();
+        criar.reset();
         aoFechar();
       },
       onError: (e) => {
@@ -310,7 +311,10 @@ function GavetaNovoFornecedor({ aoFechar }: { aoFechar: () => void }) {
               Chave de API
               <input
                 type="password"
-                autoComplete="off"
+                autoComplete="new-password"
+                data-1p-ignore
+                data-lpignore="true"
+                data-form-type="other"
                 aria-invalid={!!errors.chave}
                 {...register("chave")}
               />
@@ -438,15 +442,21 @@ function GavetaEditarFornecedor({ fornecedor, aoFechar }: { fornecedor: Forneced
       return;
     }
 
-    const candidato = {
-      nome: campos.nome,
-      endereco: ehSimulado ? undefined : campos.endereco,
-      chave: !ehSimulado && campos.chave.trim() ? campos.chave : undefined,
-      usoPermitido: campos.usoPermitido,
-      limiteMensalUsd: limite,
-      avisoPercentual: aviso,
-      ativo: campos.ativo,
-    };
+    const candidato: PedidoEditarFornecedor = {};
+    if (campos.nome.trim() !== fornecedor.nome) candidato.nome = campos.nome;
+    if (!ehSimulado && campos.endereco.trim() !== fornecedor.endereco) candidato.endereco = campos.endereco;
+    if (!ehSimulado && campos.chave.trim() !== "") candidato.chave = campos.chave;
+    if (campos.usoPermitido !== fornecedor.usoPermitido) candidato.usoPermitido = campos.usoPermitido;
+    if (limite !== fornecedor.limiteMensalUsd) candidato.limiteMensalUsd = limite;
+    if (aviso !== fornecedor.avisoPercentual) candidato.avisoPercentual = aviso;
+    if (campos.ativo !== fornecedor.ativo) candidato.ativo = campos.ativo;
+
+    if (Object.keys(candidato).length === 0) {
+      setValue("chave", "");
+      reset();
+      aoFechar();
+      return;
+    }
 
     const validado = PedidoEditarFornecedor.safeParse(candidato);
     if (!validado.success) {
@@ -463,6 +473,7 @@ function GavetaEditarFornecedor({ fornecedor, aoFechar }: { fornecedor: Forneced
         onSuccess: () => {
           setValue("chave", "");
           reset();
+          editar.reset();
           aoFechar();
         },
         onError: (e) => {
@@ -521,7 +532,10 @@ function GavetaEditarFornecedor({ fornecedor, aoFechar }: { fornecedor: Forneced
               Trocar chave
               <input
                 type="password"
-                autoComplete="off"
+                autoComplete="new-password"
+                data-1p-ignore
+                data-lpignore="true"
+                data-form-type="other"
                 placeholder="Deixe vazio para manter a chave atual"
                 aria-invalid={!!errors.chave}
                 {...register("chave")}

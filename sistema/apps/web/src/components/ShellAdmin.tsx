@@ -12,13 +12,17 @@ const MENU_ADMIN = [
   { href: "/admin/registros", nome: "Registros", icone: ScrollText },
 ];
 
-export function useRedirecionarSemPermissao(erro: unknown) {
+export function useRedirecionarSemPermissao(erro: unknown): string | null {
   const router = useRouter();
+  const expirada = erro instanceof FalhaApi && erro.status === 401;
   const bloqueado = erroSemPermissao(erro);
   useEffect(() => {
-    if (bloqueado) router.replace("/inicio");
-  }, [bloqueado, router]);
-  return bloqueado;
+    if (expirada) router.replace("/entrar");
+    else if (bloqueado) router.replace("/inicio");
+  }, [expirada, bloqueado, router]);
+  if (expirada) return "Sua sessão expirou. Redirecionando…";
+  if (bloqueado) return "Você não tem acesso à Administração.";
+  return null;
 }
 
 export function ShellAdmin({ children }: { children: React.ReactNode }) {
@@ -27,9 +31,11 @@ export function ShellAdmin({ children }: { children: React.ReactNode }) {
   const rota = usePathname();
   const router = useRouter();
 
-  const semSessao = sessao.error instanceof FalhaApi && sessao.error.status === 401;
   const ehAdmin = Boolean(sessao.data?.usuario.adminPlataforma);
   const avisos = useAvisosAdmin(ehAdmin);
+  const semSessao =
+    (sessao.error instanceof FalhaApi && sessao.error.status === 401) ||
+    (avisos.error instanceof FalhaApi && avisos.error.status === 401);
   const semPermissaoApi = erroSemPermissao(avisos.error);
   const semPermissao = Boolean(sessao.data && !ehAdmin) || semPermissaoApi;
 
