@@ -91,15 +91,17 @@ Testes com um **fornecedor simulado**, identificado como tal na tela e nos regis
 Detalhes decididos em 25/11/2026 ([[prd-lauragrowth20|PRD 2.0]] v1.4, §3, §8.3, §9, §11): área de **Administração** só para o administrador da plataforma; cadastro de **modelos** com "Ler modelos disponíveis" e inclusão manual; endereço preenchido pelo tipo (OpenAI, compatível com OpenAI, Anthropic, simulado); preços manuais com vigência; limite mensal e percentual de aviso por fornecedor ou por modelo; principal e reserva obrigatórios; botão "Testar"; chave cifrada com `LG_CHAVE_CIFRAGEM` (já no `.env` da VM).
 
 Pronto quando (critérios AC29, AC30 e AC32 a AC39 do PRD 2.0):
-- [ ] Só você vê e usa a área de Administração; outra pessoa é recusada pelo servidor (AC37).
-- [ ] Você cadastra fornecedores por chave de API para texto e imagem (simulado vale enquanto não houver contratação), com endereço preenchido pelo tipo; endereço sem https ou interno é recusado (AC39).
-- [ ] A chave não aparece inteira depois de salva (AC32).
-- [ ] "Ler modelos disponíveis" traz a lista do fornecedor, e você inclui um modelo à mão; falhas aparecem com mensagem clara (AC38).
-- [ ] Você cadastra preço por modelo, com vigência, e limite com percentual de aviso; o aviso aparece e, no limite, a reserva assume (AC34).
-- [ ] Você escolhe principal e reserva por atividade; sem os dois, a atividade não roda (AC36); quando o principal falha, a reserva conclui e o registro mostra qual atendeu (AC33).
-- [ ] "Testar" funciona para texto e imagem e grava tokens e US$, com o simulado marcado como **simulado** (AC29, AC35).
-- [ ] Organizações não veem nem cadastram fornecedores (AC30).
+- [x] Só você vê e usa a área de Administração; outra pessoa é recusada pelo servidor (AC37).
+- [x] Você cadastra fornecedores por chave de API para texto e imagem (simulado vale enquanto não houver contratação), com endereço preenchido pelo tipo; endereço sem https ou interno é recusado (AC39).
+- [x] A chave não aparece inteira depois de salva (AC32).
+- [x] "Ler modelos disponíveis" traz a lista do fornecedor, e você inclui um modelo à mão; falhas aparecem com mensagem clara (AC38).
+- [x] Você cadastra preço por modelo, com vigência, e limite com percentual de aviso; o aviso aparece e, no limite, a reserva assume (AC34).
+- [x] Você escolhe principal e reserva por atividade; sem os dois, a atividade não roda (AC36); quando o principal falha, a reserva conclui e o registro mostra qual atendeu (AC33).
+- [x] "Testar" funciona para texto e imagem e grava tokens e US$, com o simulado marcado como **simulado** (AC29, AC35).
+- [x] Organizações não veem nem cadastram fornecedores (AC30).
 - [ ] Com a chave real de texto, um teste grava tokens e US$ reais (aguarda fornecedor contratado).
+
+Situação em 25/11/2026: itens marcados comprovados por testes automáticos (Go e Playwright) na branch `etapa-2a-1-cadastro-ia`, aguardando o PR. Falta só o teste com a chave real.
 
 ### 2A-2 — Assinatura logada (depois de conferir os termos)
 **Antes de começar:** conferir os termos de uso das assinaturas para uso pela plataforma e definir como a plataforma se conecta à assinatura e como conta os tokens.
