@@ -17,6 +17,7 @@ Parte do [[PRD - Plataforma Laura Growth]]. Detalha, em ordem, como construir o 
 - Cada etapa termina em algo que você consegue **ver e testar**.
 - Ao pedir a etapa para a ferramenta de IA, copie os requisitos citados (os códigos levam às notas do PRD).
 - A partir da **etapa 5** a plataforma já é útil no dia a dia, mesmo sem publicação automática.
+- **Regras de entrega (decididas em 25/11/2026):** cada etapa sai numa branch própria (ex.: `etapa-2a-1-cadastro-ia`), partindo da `main` atualizada, e vira um PR para você revisar; nunca push direto na `main` nem merge pelo agente. Vale o mínimo de pronto do [[prd-lauragrowth20|PRD 2.0]] §15.1 (um teste por critério, testes antigos passando, typecheck e `go vet` limpos, cobertura do servidor ≥ 60%, teste de tela com Playwright, migração que só acrescenta, backup antes de migrar). Na VM, dev e stage são a mesma pasta e o mesmo banco.
 
 ## Visão geral
 | Etapa | Entrega | Já dá para usar? |
@@ -24,7 +25,8 @@ Parte do [[PRD - Plataforma Laura Growth]]. Detalha, em ordem, como construir o 
 | 0 | Preparação | — |
 | 1 | Acesso e organizações | Não |
 | 2 | Kit de marca | Não |
-| 2A | Cadastro de IA (chave de API ou assinatura) + registro de tokens e US$ | Não |
+| 2A-1 | Cadastro de IA por chave de API + registro de tokens e US$ | Não |
+| 2A-2 | Cadastro de IA por assinatura logada (após conferir os termos) | Não |
 | 2B | Acessos por pessoa e por alçada | Não |
 | 2C | DNA da marca (kit ampliado, com versões) | Não |
 | 2D | Chat do CMO (onboarding conversado) | Parcial (DNA da marca) |
@@ -81,15 +83,33 @@ O plano do primeiro mês, que fecha o onboarding, passa a existir na etapa 2E (a
 **Constrói:** cadastro de fornecedores de IA em Configurações, de dois tipos: **chave de API** ou **assinatura logada** (ex.: Claude Code, Codex, Antigravity). Escolha do fornecedor de cada etapa, com reserva. Registro de tokens e custo em US$ de toda atividade.
 **Requisitos:** AGT-07, AGT-08, AGT-09, CST-01; PRD 2.0 §8 e §12 (custo).
 
-Pronto quando:
-- [ ] Você cadastra pelo menos 2 fornecedores por serviço (texto e imagem).
-- [ ] A chave não aparece inteira depois de salva.
-- [ ] Você cadastra uma assinatura logada e a plataforma consegue usá-la em uma etapa.
-- [ ] Assinatura logada só pode ser usada pelas organizações da casa (Laura Hub e Laura Growth).
-- [ ] Você escolhe fornecedores diferentes por etapa; quando o principal falha, a reserva conclui a tarefa e o registro mostra qual foi usado.
-- [ ] Cada atividade grava tokens e US$; na assinatura o valor aparece marcado como **estimado**.
+Dividida em duas partes (decidido em 2026-11-24; [[Revisão PRD 2.0 - Etapa 2A]]). O cadastro vale para a plataforma toda e, por enquanto, só você cadastra.
 
-**Antes de começar:** conferir os termos de uso das assinaturas para uso pela plataforma.
+### 2A-1 — Chave de API (começa já)
+Testes com um **fornecedor simulado**, identificado como tal na tela e nos registros, e **uma chave real de texto** no teste final. Os 2 fornecedores reais por serviço passam a ser cobrados quando forem contratados.
+
+Detalhes decididos em 25/11/2026 ([[prd-lauragrowth20|PRD 2.0]] v1.4, §3, §8.3, §9, §11): área de **Administração** só para o administrador da plataforma; cadastro de **modelos** com "Ler modelos disponíveis" e inclusão manual; endereço preenchido pelo tipo (OpenAI, compatível com OpenAI, Anthropic, simulado); preços manuais com vigência; limite mensal e percentual de aviso por fornecedor ou por modelo; principal e reserva obrigatórios; botão "Testar"; chave cifrada com `LG_CHAVE_CIFRAGEM` (já no `.env` da VM).
+
+Pronto quando (critérios AC29, AC30 e AC32 a AC39 do PRD 2.0):
+- [ ] Só você vê e usa a área de Administração; outra pessoa é recusada pelo servidor (AC37).
+- [ ] Você cadastra fornecedores por chave de API para texto e imagem (simulado vale enquanto não houver contratação), com endereço preenchido pelo tipo; endereço sem https ou interno é recusado (AC39).
+- [ ] A chave não aparece inteira depois de salva (AC32).
+- [ ] "Ler modelos disponíveis" traz a lista do fornecedor, e você inclui um modelo à mão; falhas aparecem com mensagem clara (AC38).
+- [ ] Você cadastra preço por modelo, com vigência, e limite com percentual de aviso; o aviso aparece e, no limite, a reserva assume (AC34).
+- [ ] Você escolhe principal e reserva por atividade; sem os dois, a atividade não roda (AC36); quando o principal falha, a reserva conclui e o registro mostra qual atendeu (AC33).
+- [ ] "Testar" funciona para texto e imagem e grava tokens e US$, com o simulado marcado como **simulado** (AC29, AC35).
+- [ ] Organizações não veem nem cadastram fornecedores (AC30).
+- [ ] Com a chave real de texto, um teste grava tokens e US$ reais (aguarda fornecedor contratado).
+
+### 2A-2 — Assinatura logada (depois de conferir os termos)
+**Antes de começar:** conferir os termos de uso das assinaturas para uso pela plataforma e definir como a plataforma se conecta à assinatura e como conta os tokens.
+
+Pronto quando:
+- [ ] Você cadastra uma assinatura logada e a plataforma consegue usá-la em uma etapa.
+- [ ] Assinatura logada só atende atividades das organizações da casa (Laura Hub e Laura Growth).
+- [ ] Na assinatura, o valor em US$ aparece marcado como **estimado**.
+
+A 2A-2 não bloqueia as etapas seguintes: a 2B pode começar quando a 2A-1 estiver pronta.
 
 ## Etapa 2B — Acessos por pessoa e por alçada
 **Constrói:** convite de pessoas para uma organização e escolha, pessoa a pessoa, do que cada uma pode fazer. **Sem perfis fixos.**
@@ -100,7 +120,9 @@ Pronto quando:
 - [ ] Você marca as alçadas dela uma a uma.
 - [ ] Uma pessoa sem a alçada não consegue fazer a ação, nem forçando pelo endereço da página (verificação no servidor).
 
-Lista de alçadas proposta *(a confirmar)*: ver a marca e os posts; conversar com o CMO e editar o DNA da marca; aprovar o plano de marketing; criar e editar posts; aprovar posts para publicação; conectar e desconectar redes; cadastrar fornecedores de IA; ver custos (US$ ou só créditos); convidar pessoas e dar acessos.
+Lista de alçadas proposta *(a confirmar)*: ver a marca e os posts; conversar com o CMO e editar o DNA da marca; aprovar o plano de marketing; criar e editar posts; aprovar posts para publicação; conectar e desconectar redes; ver custos (US$ ou só créditos); convidar pessoas e dar acessos.
+
+Permissão da equipe Laura (não é alçada da organização): cadastrar fornecedores de IA. Até a 2B, só o administrador da plataforma (decidido em 2026-11-24; [[prd-lauragrowth20|PRD 2.0]] §8.3).
 
 ## Etapa 2C — DNA da marca
 **Constrói:** o kit de marca ampliado com os campos essenciais do PRD 2.0, versões e a origem de cada informação.

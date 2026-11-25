@@ -16,7 +16,7 @@ Comece por aqui. Cada item abaixo é um clique.
 - [[Registro de Decisões]]
 - [[prd-lauragrowth20|PRD LauraGrowth 2.0]] — PRD vigente da plataforma
 - [[PRD - Plataforma Laura Growth]] — PRD anterior (substituído, para consulta)
-  - Construção: [[Adequação ao PRD 2.0]] · [[Roteiro de Construção - Fase 1A]] · [[Design System - Plataforma Laura Growth]] · [[Benchmark - Cor de Marca]] · [[Tecnologias de Base]] · [[Especificação - Frontend Mockado]] · [[Processo de Posicionamento Digital - Análise e Sugestões]]
+  - Construção: [[Adequação ao PRD 2.0]] · [[Revisão PRD 2.0 - Etapa 2A]] · [[Roteiro de Construção - Fase 1A]] · [[Design System - Plataforma Laura Growth]] · [[Benchmark - Cor de Marca]] · [[Tecnologias de Base]] · [[Especificação - Frontend Mockado]] · [[Processo de Posicionamento Digital - Análise e Sugestões]]
   - Comece por: [[PRD - Fases e Escopo]] · [[PRD - Fase 1 - MVP de Posts]] · [[PRD - Decisões de Negócio]]
   - Demais partes: [[PRD - Público e Perfis]] · [[PRD - Modelo de Organizações]] · [[PRD - Agentes de IA]] · [[PRD - Painel de Custos e Créditos]] · [[PRD - Permissões e Aprovações]] · [[PRD - Conexões com Plataformas]] · [[PRD - Conformidade e Regras do Setor]] · [[PRD - Indicadores de Sucesso]] · [[PRD - Riscos e Pontos a Definir]]
 

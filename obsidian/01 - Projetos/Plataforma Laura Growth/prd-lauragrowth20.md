@@ -11,8 +11,8 @@ criado: 2026-11-24
 | Campo | Valor |
 |---|---|
 | Produto | LauraGrowth 2.0 |
-| Versão do documento | 1.1 |
-| Data | 24/11/2026 |
+| Versão do documento | 1.4 |
+| Data | 25/11/2026 |
 | Status | Proposta para validação e implementação |
 | Público | Produto, engenharia, UX/UI, especialistas em IA, QA e segurança |
 | Natureza | Evolução incremental do sistema existente. Substitui o [[PRD - Plataforma Laura Growth]], aproveitando o que já foi construído (ver [[Adequação ao PRD 2.0]]) |
@@ -80,6 +80,8 @@ Os acessos são dados **por pessoa e por alçada** (o limite do que cada pessoa 
 | CMO AI | Orquestrar discovery, estratégia e recomendações dentro das permissões concedidas |
 
 Estender o controle de acesso existente (hoje só "dono" e "membro") para alçadas atribuídas por pessoa. Permissões devem ser verificadas no servidor por tenant, marca, pessoa e ação.
+
+**Administrador da plataforma (decidido em 25/11/2026).** Além das alçadas por organização, existe a marca **administrador da plataforma**, gravada na pessoa (não na organização). Só quem tem essa marca acessa a interface de **Administração** (§11): fornecedores de IA, modelos, preços, limites e custos em US$. Na etapa 2A, só o Paulo tem a marca (gravada pela semente). Na 2B, ela vira permissão atribuível a pessoas da equipe Laura. O servidor recusa o acesso de quem não tem a marca.
 
 **Pronto quando:** é possível dar ou retirar cada alçada de uma pessoa, em uma marca, sem depender de perfil fixo, e o servidor recusa ações fora das alçadas dela. Uma conta pode administrar múltiplas marcas quando o modelo comercial permitir; cada marca tem contexto e credenciais isolados. Agentes não possuem permissões superiores às concedidas para a ação.
 
@@ -489,13 +491,22 @@ Validar JSON Schema no servidor; rejeitar campos extras perigosos, referências 
 
 ### 8.3 Cadastro de fornecedores de IA
 
-- Os fornecedores de IA são cadastrados **dentro da plataforma**, com chave, limites e consumo de tokens.
-- No mínimo **2 fornecedores por serviço** (texto, imagem etc.), para haver alternativa se um falhar.
+- Os fornecedores de IA são cadastrados **pela equipe Laura** e valem para a **plataforma toda**, não por organização. A plataforma paga os fornecedores e cobra as organizações em **créditos** ([[PRD - Painel de Custos e Créditos]]). Na etapa 2A, só o administrador da plataforma cadastra; a permissão para outras pessoas da equipe Laura entra na etapa 2B.
+- **Serviços do MVP:** texto e imagem. **Atividades que escolhem fornecedor:** chat do CMO, plano de marketing, pauta, texto, imagem e revisão (Guardian). Cada atividade tem um modelo **principal** e um **reserva**; a atividade **só roda com os dois cadastrados**. Se o principal falhar, a reserva conclui e o registro mostra qual atendeu.
+- **Modelos:** cada fornecedor tem uma lista de modelos. Depois de salvar a chave, o botão **"Ler modelos disponíveis"** consulta o fornecedor e mostra os modelos para escolher; também é possível incluir à mão um modelo que não veio na lista. Para cada modelo, o administrador informa o **serviço** (texto ou imagem) e o **preço** (§9), porque as listas dos fornecedores não trazem preço.
+- **Endereço (endpoint):** o tipo do fornecedor preenche o endereço sozinho (OpenAI e Anthropic), editável. O tipo **"compatível com OpenAI"** aceita qualquer endereço, para fornecedores ou modelos novos. O servidor só aceita endereços `https` e recusa endereços internos (proteção contra SSRF). Tipos na 2A-1: OpenAI, compatível com OpenAI, Anthropic e simulado; outros entram quando contratados.
+- **Preços:** cadastrados à mão pelo administrador, por modelo e unidade (token de entrada, token de saída ou imagem), em US$, com data de início de vigência. Cada registro de atividade guarda o preço usado. Valores: a definir.
+- **Limites:** cada fornecedor (cada chave) tem **limite mensal em US$** e **percentual de aviso** (padrão 80%, editável); cada modelo pode ter limite e percentual próprios, que valem no lugar dos do fornecedor. O aviso aparece na tela de Administração. Ao atingir o limite, a atividade passa para a reserva; se a reserva também estiver no limite, a atividade para e avisa.
+- **Testar:** cada modelo tem um botão **"Testar"**, conforme o serviço: texto envia "Oi, qual modelo é você?" e mostra a resposta, os tokens e o US$; imagem pede uma imagem simples (ex.: "um círculo azul sobre fundo branco") e mostra a imagem e o custo. O teste não exige reserva e gera registro de atividade.
+- **Guarda da chave:** a chave é **cifrada no banco**, com segredo derivado da variável `LG_CHAVE_CIFRAGEM`, que fica só no arquivo de configuração do servidor (nunca no banco nem no GitHub). Depois de salva, a tela mostra só os 4 últimos caracteres. A chave nunca aparece em logs, prompts ou respostas do servidor. Um cofre de senhas dedicado fica para antes do primeiro cliente (§19).
+- Em caso de conflito com AGT-07, AGT-08, AGT-09 e CST-01 do [[PRD - Plataforma Laura Growth|PRD anterior]], vale este PRD.
 - Dois tipos de cadastro: **chave de API** ou **assinatura logada** (ex.: Claude Code, Codex, Antigravity).
-- A assinatura logada só pode ser usada pelas organizações da casa (Laura Hub e Laura Growth). Os clientes usam chave de API. Antes de usar, conferir os termos de uso de cada fornecedor (ver Pendências).
+- A assinatura logada só atende atividades das organizações da casa (Laura Hub e Laura Growth). Atividades de clientes usam sempre um fornecedor por chave de API. Antes de usar, conferir os termos de uso de cada fornecedor (ver Pendências).
 - Toda atividade registra **tokens e US$**. Na assinatura, o US$ é **estimado** (equivale ao preço da API) e o painel mostra que é estimado.
+- **Construção em duas partes:** a etapa **2A-1** faz o cadastro por chave de API; a **2A-2** faz a assinatura logada, só depois de conferidos os termos de uso e definidos como a plataforma se conecta à assinatura e como conta os tokens.
+- **Testes sem fornecedor contratado:** valem um **fornecedor simulado**, identificado como tal na tela e nos registros (§2, item 8), e **uma chave real de texto** no teste final. Os 2 fornecedores reais por serviço passam a ser exigidos quando forem contratados.
 
-**Pronto quando:** é possível cadastrar 2 ou mais fornecedores por serviço (por chave ou, para a casa, por assinatura), definir limites, e cada atividade de IA aparece com tokens e US$, marcado como real ou estimado.
+**Pronto quando:** a equipe Laura cadastra fornecedores e modelos (por chave ou por assinatura), escolhe principal e reserva por atividade, define limites e avisos, e cada atividade de IA aparece com tokens e US$, marcado como real ou estimado. Organizações não veem nem cadastram fornecedores; atividades de clientes nunca usam assinatura.
 
 ## 9. Modelo lógico de dados
 
@@ -530,8 +541,11 @@ Todas as entidades específicas de marca devem carregar tenant_id, brand_id, id,
 | PerformanceMetric | canal, indicador, valor, unidade, fonte, janela |
 | GrowthExperiment | hipótese, variante, KPI, guardrails, resultado |
 | AuditEvent | ator, ação, alvo, versão, timestamp, correlação |
-| AgentRun | agente, fornecedor, modelo/prompt, contexto, status, tokens, custo em US$, custo estimado (sim/não), erro |
-| AIProvider | serviço, tipo de cadastro (chave de API ou assinatura), referência ao segredo, limites, organização autorizada, status |
+| AgentRun | agente, atividade, fornecedor, modelo/prompt, contexto, status, tokens de entrada e saída, imagens, preço usado, custo em US$, custo estimado (sim/não), simulado (sim/não), atendido pela reserva (sim/não), erro |
+| AIProvider | nome, tipo (OpenAI, compatível com OpenAI, Anthropic, simulado), tipo de cadastro (chave de API ou assinatura), endereço (endpoint), chave cifrada e 4 últimos caracteres, limite mensal em US$, percentual de aviso, uso permitido (todas as organizações ou só as da casa), status. Entidade da plataforma: não leva tenant_id nem brand_id |
+| AIModel | fornecedor, identificador do modelo, serviço (texto ou imagem), origem (lido do fornecedor ou incluído à mão), limite mensal e percentual de aviso próprios (opcionais), status |
+| AIModelPrice | modelo, unidade (token de entrada, token de saída, imagem), preço em US$, vigência a partir de |
+| AIActivityRoute | atividade (chat do CMO, plano, pauta, texto, imagem, revisão), modelo principal, modelo reserva |
 
 Relações principais: marca 1:N canais, objetivos, sessões, planos, campanhas e ativos; campanha 1:N itens; item 1:N versões e jobs; aprovação vinculada à versão exata; plano aprovado referencia snapshot de conhecimento e agenda. Usar restrições únicas para idempotência e identificadores externos por conta/provedor.
 
@@ -569,11 +583,13 @@ Eventos lógicos: brand.fact.confirmed, brand.fact.corrected, onboarding.ready, 
 
 Preservar layout e componentes atuais. O onboarding é um chat com o CMO, com o progresso ao lado, partindo dos 4 passos do protótipo aprovado. Criar ou evoluir: CMO Cockpit, Brand Studio, Brand Brain, Market Intelligence, Growth Planner, Channel Manager, Campaign Manager, Marketing Agenda, Content Studio, Creative Studio, Media Center, Approval Center, Publishing Hub, Growth Analytics, Integration Hub e Asset Library. No MVP, agrupar módulos relacionados para evitar navegação excessiva.
 
+**Duas interfaces no mesmo app (decidido em 25/11/2026):** **Operação**, usada pelas organizações (kit, marca, plano, posts, aprovações), e **Administração**, usada pela equipe Laura (fornecedores de IA, modelos, preços, limites, custos em US$ e, depois, permissões da equipe). A Administração tem menu e visual próprios e só aparece para quem é administrador da plataforma (§3).
+
 Fluxo recomendado: selecionar/criar marca → conversa inicial → confirmar descoberta → revisar identidade/audiência/metas → selecionar canais → revisar plano e agenda → aprovar → produzir conteúdo. Chat persistente disponível durante toda a jornada; painel lateral de dados aprendidos e pendências; botões de edição, confirmação e origem. Salvar automaticamente cada resposta, indicar falhas, oferecer estados vazios, loading e recuperação. Acessibilidade por teclado, contraste, labels, leitores de tela, responsividade e texto equivalente a gráficos. Exibir modo manual, simulado ou conectado sem ambiguidade.
 
 ## 12. Requisitos não funcionais
 
-- **Segurança:** RBAC, isolamento multi-tenant, criptografia em trânsito e repouso, secret vault, proteção contra SSRF na descoberta de URLs, limitação de requisições, validação de arquivos, auditoria e revisão de dependências.
+- **Segurança:** RBAC, isolamento multi-tenant, criptografia em trânsito e repouso, chaves de IA cifradas no banco com segredo fora dele (§8.3) e cofre de segredos antes do primeiro cliente, proteção contra SSRF na descoberta de URLs, limitação de requisições, validação de arquivos, auditoria e revisão de dependências.
 - **Privacidade/LGPD:** minimizar dados pessoais, definir finalidade e base legal, controlar retenção, exportação e exclusão conforme política e obrigações, gerir consentimento quando aplicável, avaliar fornecedores e transferências internacionais. Não armazenar dados de saúde de pacientes ou outras informações sensíveis sem necessidade e controles específicos. Validar requisitos com responsável jurídico/privacidade.
 - **Confiabilidade:** filas duráveis, retries limitados, deduplicação, timeouts, circuit breakers, backups, restauração testada e recuperação de sessões.
 - **Performance:** metas iniciais propostas: p95 de leitura de dados internos abaixo de 1s; feedback inicial do chat em até 3s quando possível; geração longa via job com progresso. Medir em ambiente representativo e ajustar após baseline; não prometer latência de terceiros.
@@ -614,8 +630,16 @@ Fluxo recomendado: selecionar/criar marca → conversa inicial → confirmar des
 | AC27 | Dado ajuste de orçamento sugerido pelo analista, então não é aplicado sem aprovação e limite. |
 | AC28 | Dada falha de migração/rollout, então equipe consegue desabilitar feature e recuperar serviço sem perda de dados. |
 | AC29 | Dada qualquer atividade de IA, então ficam registrados tokens e US$; em assinatura logada, o US$ aparece como estimado. |
-| AC30 | Dado um cliente (organização de fora da casa), então só pode cadastrar fornecedor de IA por chave de API, não por assinatura. |
+| AC30 | Dada uma atividade de IA de um cliente (organização de fora da casa), então a plataforma usa só fornecedor por chave de API, nunca assinatura logada; e a organização não vê nem cadastra fornecedores. |
 | AC31 | Dado conteúdo com regra do setor não marcada pelo cliente, então o Guardian alerta mas não bloqueia; se o cliente marcou em "o que evitar", bloqueia. |
+| AC32 | Dada uma chave de API salva, então ela nunca aparece inteira: a tela mostra só os 4 últimos caracteres, e logs e respostas do servidor não a contêm. |
+| AC33 | Dado que o modelo principal de uma atividade falha, então o reserva conclui a tarefa e o registro mostra qual modelo atendeu. |
+| AC34 | Dado um fornecedor ou modelo com limite e percentual de aviso, quando o gasto do mês atinge o percentual, então a Administração mostra o aviso; ao atingir o limite, a atividade passa para a reserva; se a reserva também estiver no limite, a atividade para e avisa. |
+| AC35 | Dado um modelo cadastrado, quando o administrador clica em "Testar", então texto responde a "Oi, qual modelo é você?" e imagem gera uma imagem simples, mostrando o resultado, tokens e US$; com o fornecedor simulado, o resultado e o registro aparecem marcados como simulado. |
+| AC36 | Dada uma atividade sem modelo principal ou sem reserva cadastrado, então ela não roda e informa o que falta. |
+| AC37 | Dada uma pessoa que não é administradora da plataforma, então ela não vê a Administração e o servidor recusa as ações dela. |
+| AC38 | Dada uma chave salva, quando o administrador clica em "Ler modelos disponíveis", então aparece a lista do fornecedor; se falhar (chave inválida, fornecedor fora do ar), aparece mensagem clara, sem expor a chave. |
+| AC39 | Dado um endereço de fornecedor que não seja https ou que aponte para a rede interna, então o servidor recusa o cadastro. |
 
 Testes: unitários (regras, schemas, score, estados, orçamento), integração (banco, filas, conectores sandbox, OAuth), E2E (onboarding até agenda e aprovação), regressão legado, segurança (IDOR, injeção de prompt, SSRF), acessibilidade, carga e avaliação de IA com casos de diferentes setores. Testar concorrência, retries e falhas parciais. Não usar credenciais ou dados reais em fixtures.
 
@@ -645,7 +669,8 @@ A ordem de construção segue o [[Roteiro de Construção - Fase 1A]]. O chat do
 | Etapa do roteiro | Entrega | Critério de saída |
 |---|---|---|
 | Diagnóstico (concluído) | inventário e mapa de gaps em [[Adequação ao PRD 2.0]] | nota aprovada |
-| 2A — Cadastro de IA | fornecedores por chave ou assinatura, tokens e US$ (§8.3) | AC29–30 |
+| 2A-1 — Cadastro de IA por chave | Administração; fornecedores por chave de API, modelos, preços, limites e avisos, principal e reserva por atividade, botão Testar, tokens e US$ (§8.3); testes com fornecedor simulado e 1 chave real de texto | AC29 (valor real, quando houver a chave), AC30 e AC32–AC39 |
+| 2A-2 — Assinatura logada | fornecedores por assinatura, só para atividades da casa, US$ estimado (§8.3); começa após conferir os termos de uso | AC29 (valor estimado) |
 | 2B — Acessos | pessoas e alçadas, sem perfis fixos (§3) | AC18 e "pronto quando" do §3 |
 | 2C — DNA da marca | kit de marca ampliado para Brand DNA e Brand Brain | AC02, AC04–05, AC07 |
 | 2D — Chat do CMO | onboarding em chat, no lugar dos 4 passos | AC01, AC03, AC06, AC08, AC19, AC22, AC24 |
@@ -658,6 +683,8 @@ MVP = etapas 2A a 8 (até a publicação automática). Selecionar conectores pri
 ### 15.1 Definition of Done
 
 Uma história está concluída quando: requisito e critério de aceitação atendidos; testes relevantes e regressão aprovados; migração e rollback documentados; UX de erro e vazio tratadas; autorização e privacidade revisadas; logs e métricas disponíveis; documentação de API/configuração atualizada; limitações explícitas; validação de produto/QA registrada. Integração externa só é considerada operacional após verificação real com conta autorizada.
+
+**Mínimo obrigatório nas etapas da Fase 1A (decidido em 25/11/2026):** um teste automático para cada critério de aceite da etapa; testes antigos passando; typecheck e `go vet` sem erros; cobertura dos testes do servidor de pelo menos 60%; teste de tela (Playwright) no caminho principal da etapa; migração do banco só acrescenta, com o jeito de desfazer escrito em comentário; backup do banco antes de migrar. Entrega em branch própria, com PR para revisão do Paulo.
 
 ## 16. Riscos e mitigação
 
@@ -692,9 +719,12 @@ O onboarding é o nascimento da inteligência de marketing da marca dentro da La
 
 | Pendência | Dono | Data |
 |---|---|---|
-| Contratar ou definir o primeiro fornecedor de IA (bloqueia testes reais do chat e dos posts) | a definir | a definir |
-| Conferir os termos de uso das assinaturas (Claude Code, Codex, Antigravity) para uso pela plataforma | a definir | a definir |
+| Contratar ou definir o primeiro fornecedor de IA (bloqueia o teste final da 2A-1 e os testes reais do chat e dos posts) | a definir | a definir |
+| Conferir os termos de uso das assinaturas (Claude Code, Codex, Antigravity) para uso pela plataforma (bloqueia a 2A-2) | a definir | a definir |
 | Confirmar a lista de alçadas (proposta na etapa 2B do [[Roteiro de Construção - Fase 1A]]) | a definir | a definir |
+| Preços de cada modelo de IA (cadastrados pelo administrador quando houver fornecedor) | Paulo | a definir |
+| Cofre de senhas dedicado para as chaves de IA (antes do primeiro cliente) | a definir | a definir |
+| Avaliar fornecedores de IA e envio de dados ao exterior (LGPD) antes de atender o primeiro cliente | a definir | a definir |
 | Confirmar se mudar só a data ou o horário de um post aprovado também exige nova aprovação | a definir | a definir |
 | Definir em quais redes a publicação automática entra no MVP | a definir | a definir |
 
@@ -704,5 +734,8 @@ O onboarding é o nascimento da inteligência de marketing da marca dentro da La
 |---|---|---|---|
 | 24/11/2026 | 1.0 | Versão inicial do PRD 2.0 | — |
 | 24/11/2026 | 1.1 | Substitui o PRD anterior; MVP até a publicação automática; usuários e acessos por alçada; setores do MVP (clínicas de estética e a casa); cadastro de IA com 2+ fornecedores, chave ou assinatura, tokens e US$; onboarding em chat; mínimo para seguir; reaprovação a qualquer mudança; regras do setor só alertam; roteiro 2A–2E antes dos posts | [[Adequação ao PRD 2.0]] |
+| 24/11/2026 | 1.2 | Cadastro de IA é da plataforma toda (equipe Laura), não por organização, por causa da cobrança em créditos; assinatura logada só atende atividades da casa; na 2A só o administrador da plataforma cadastra (§8.3, §9, AC30) | [[Revisão PRD 2.0 - Etapa 2A]] |
+| 24/11/2026 | 1.3 | Etapa 2A dividida em 2A-1 (chave de API) e 2A-2 (assinatura logada, após conferir os termos); testes com fornecedor simulado e 1 chave real de texto até haver contratação (§8.3, §15, §19) | [[Revisão PRD 2.0 - Etapa 2A]] |
+| 25/11/2026 | 1.4 | Cadastro de modelos com "Ler modelos disponíveis" e inclusão manual; endereço por tipo de fornecedor, com proteção contra SSRF; preços manuais com vigência; limite mensal e percentual de aviso por fornecedor ou modelo; principal e reserva obrigatórios por atividade; botão Testar; chave cifrada com `LG_CHAVE_CIFRAGEM`; administrador da plataforma e interfaces de Administração e Operação; AC32–AC39; mínimo de pronto da Fase 1A (§3, §8.3, §9, §11, §12, §13, §15, §15.1, §19) | [[Revisão PRD 2.0 - Etapa 2A]] |
 
 Relacionado: [[PRD - Plataforma Laura Growth]] · [[Adequação ao PRD 2.0]] · [[Roteiro de Construção - Fase 1A]] · [[Índice - Projetos]] · [[Home]]
