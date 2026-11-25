@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -377,15 +378,18 @@ func TestAC39ProtecaoDeEnderecoEClienteSeguro(t *testing.T) {
 	defer tlsSrv.Close()
 
 	clienteSeg := novoClienteSeguro(2 * time.Second)
-	if _, err := clienteSeg.Get(tlsSrv.URL); err == nil {
-		t.Fatal("novoClienteSeguro deveria recusar conectar em 127.0.0.1")
-	}
 	tr, ok := clienteSeg.Transport.(*http.Transport)
 	if !ok || tr.TLSClientConfig == nil || tr.TLSClientConfig.MinVersion < tls.VersionTLS12 {
 		t.Fatalf("TLS mínimo esperado >= 1.2, veio %+v", tr)
 	}
+	// Faz o cliente confiar no certificado do servidor de teste para provar que a recusa vem do bloqueio de 127.0.0.1.
+	tr.TLSClientConfig = tlsSrv.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	tr.TLSClientConfig.MinVersion = tls.VersionTLS12
+	if _, err := clienteSeg.Get(tlsSrv.URL); !errors.Is(err, errRedeInternaRecusada) {
+		t.Fatalf("novoClienteSeguro deveria recusar 127.0.0.1 por rede interna, veio: %v", err)
+	}
 	reqFake, _ := http.NewRequest("GET", "https://api.openai.com/v1", nil)
-	if err := clienteSeg.CheckRedirect(reqFake, []*http.Request{reqFake}); err == nil {
+	if err := clienteSeg.CheckRedirect(reqFake, []*http.Request{reqFake}); !errors.Is(err, errRedirecionamentoRecusado) {
 		t.Fatal("novoClienteSeguro deveria recusar redirecionamento")
 	}
 }
@@ -506,6 +510,20 @@ func TestFornecedoresRegrasLimitesEFuso(t *testing.T) {
 	var simDesativado Fornecedor
 	if st := c.pedir("PATCH", "/api/admin/fornecedores/"+sim.ID, map[string]any{"ativo": false}, &simDesativado); st != 200 || simDesativado.Ativo || simDesativado.Situacao != "limite" || simDesativado.GastoMesUsd != 10 {
 		t.Fatalf("PATCH desativar inesperado: %d %+v", st, simDesativado)
+	}
+
+	// Regras de PATCH: endereço interno (AC39), nome repetido (409), limite inválido (400) e id inexistente (404).
+	if st, body := c.pedirComCorpo("PATCH", "/api/admin/fornecedores/"+oai.ID, map[string]any{"endereco": "https://127.0.0.1/v1"}); st != 400 || !strings.Contains(string(body), "endereco_invalido") {
+		t.Fatalf("PATCH endereço interno esperava 400 endereco_invalido, veio %d (%s)", st, body)
+	}
+	if st, body := c.pedirComCorpo("PATCH", "/api/admin/fornecedores/"+oai.ID, map[string]any{"nome": "anthropic padrão"}); st != 409 || !strings.Contains(string(body), "nome_repetido") {
+		t.Fatalf("PATCH nome repetido esperava 409 nome_repetido, veio %d (%s)", st, body)
+	}
+	if st, body := c.pedirComCorpo("PATCH", "/api/admin/fornecedores/"+oai.ID, map[string]any{"limiteMensalUsd": 0}); st != 400 || !strings.Contains(string(body), "dados_invalidos") {
+		t.Fatalf("PATCH limite inválido esperava 400 dados_invalidos, veio %d (%s)", st, body)
+	}
+	if st, body := c.pedirComCorpo("PATCH", "/api/admin/fornecedores/00000000-0000-0000-0000-000000000000", map[string]any{"nome": "X"}); st != 404 || !strings.Contains(string(body), "nao_encontrado") {
+		t.Fatalf("PATCH id inexistente esperava 404 nao_encontrado, veio %d (%s)", st, body)
 	}
 
 	// Aritmética exata com frações decimais (0.1 + 0.2 = 0.30 de 0.30 -> limite; 0.24 de 0.30 -> aviso).

@@ -16,7 +16,10 @@ import (
 
 type resolvedorIP func(ctx context.Context, host string) ([]netip.Addr, error)
 
-var errRedirecionamentoRecusado = errors.New("redirecionamentos não são permitidos")
+var (
+	errRedirecionamentoRecusado = errors.New("redirecionamentos não são permitidos")
+	errRedeInternaRecusada      = errors.New("conexão recusada: endereço de rede interna não permitido")
+)
 
 var faixasInternas = func() []netip.Prefix {
 	cidrs := []string{
@@ -146,7 +149,7 @@ func novoClienteSeguro(timeout time.Duration) *http.Client {
 				return errors.New("endereço de conexão inválido")
 			}
 			if !ipPublico(ap.Addr()) {
-				return errors.New("conexão recusada: endereço de rede interna não permitido")
+				return errRedeInternaRecusada
 			}
 			return nil
 		},
