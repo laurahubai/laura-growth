@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"math/big"
 	"net/http"
@@ -286,16 +287,6 @@ func (a *API) testarModelo(w http.ResponseWriter, r *http.Request, s contextoSes
 		return
 	}
 
-	noLimite, err := a.candidatoNoLimite(r.Context(), cand)
-	if err != nil {
-		falhaInterna(w, err)
-		return
-	}
-	if noLimite {
-		erro(w, 409, "limite_atingido", "O limite mensal deste modelo ou fornecedor foi atingido.")
-		return
-	}
-
 	prompt := promptTesteTexto
 	if cand.servico == "imagem" {
 		prompt = promptTesteImagem
@@ -306,8 +297,8 @@ func (a *API) testarModelo(w http.ResponseWriter, r *http.Request, s contextoSes
 		return
 	}
 
-	execucaoID, texto, imagemURL, tokensIn, tokensOut, imgs, custoUsd, err := a.executarEGerar(
-		r.Context(), cand, precos, correlacaoID, "teste", s.orgAtiva, s.usuario.ID, 1, false, prompt,
+	res, err := a.executarComTrava(
+		r.Context(), cand, precos, correlacaoID, "teste", "", s.usuario.ID, 1, false, prompt, false,
 	)
 	if err != nil {
 		var ef *erroFornecedor
@@ -320,20 +311,29 @@ func (a *API) testarModelo(w http.ResponseWriter, r *http.Request, s contextoSes
 			erro(w, 400, "endereco_invalido", ee.mensagem)
 			return
 		}
+		var ei *erroInternoExecucao
+		if errors.As(err, &ei) {
+			erro(w, 500, "falha_interna", "Algo deu errado. Tente de novo.")
+			return
+		}
 		falhaInterna(w, err)
+		return
+	}
+	if res.puladoLimite {
+		erro(w, 409, "limite_atingido", "O limite mensal deste modelo ou fornecedor foi atingido.")
 		return
 	}
 
 	responder(w, 200, ResultadoTeste{
-		ExecucaoID:    execucaoID,
+		ExecucaoID:    res.execucaoID,
 		Servico:       cand.servico,
 		Modelo:        cand.resumo(),
-		Texto:         texto,
-		ImagemDataUrl: imagemURL,
-		TokensEntrada: tokensIn,
-		TokensSaida:   tokensOut,
-		Imagens:       imgs,
-		CustoUsd:      custoUsd,
+		Texto:         res.texto,
+		ImagemDataUrl: res.imagemURL,
+		TokensEntrada: res.tokensIn,
+		TokensSaida:   res.tokensOut,
+		Imagens:       res.imgs,
+		CustoUsd:      res.custoUsd,
 		Simulado:      cand.fornecedorTipo == "simulado",
 	})
 }
@@ -348,7 +348,7 @@ func (a *API) testarAtividade(w http.ResponseWriter, r *http.Request, s contexto
 	if def.Servico == "imagem" {
 		prompt = promptTesteImagem
 	}
-	res, statusHTTP, codErro, msgErro := a.executarAtividade(r.Context(), def.Codigo, s.orgAtiva, s.usuario.ID, prompt)
+	res, statusHTTP, codErro, msgErro := a.executarAtividade(r.Context(), def.Codigo, "", s.usuario.ID, prompt)
 	if statusHTTP != 0 {
 		erro(w, statusHTTP, codErro, msgErro)
 		return
@@ -489,7 +489,7 @@ func (a *API) executarAtividade(ctx context.Context, atividade, orgID, usuarioID
 		return ResultadoAtividade{}, 409, "atividade_incompleta", "Atividade incompleta. Falta: " + strings.Join(rota.Falta, ", ") + "."
 	}
 
-	orgDaCasa := true
+	orgDaCasa := false
 	if orgID != "" {
 		err := a.banco.QueryRow(ctx, `SELECT da_casa FROM organizacoes WHERE id::text = $1`, orgID).Scan(&orgDaCasa)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -532,9 +532,9 @@ func (a *API) executarAtividade(ctx context.Context, atividade, orgID, usuarioID
 		}
 
 		// Verificação de uso restrito à casa (AC30).
-		if cand.usoPermitido == "casa" && orgID != "" && !orgDaCasa {
+		if cand.usoPermitido == "casa" && !orgDaCasa {
 			msg := "Fornecedor restrito às organizações da casa."
-			if err := a.registrarTentativaSemExecucao(ctx, cand, precos, correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, "falha", msg); err != nil {
+			if err := a.registrarTentativaSemExecucaoEm(ctx, a.banco, cand, precos, correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, "falha", msg); err != nil {
 				slog.Error("falha ao registrar tentativa", "erro", err)
 				return ResultadoAtividade{}, 500, "falha_interna", "Algo deu errado. Tente de novo."
 			}
@@ -546,7 +546,7 @@ func (a *API) executarAtividade(ctx context.Context, atividade, orgID, usuarioID
 		// Verificação de modelo/fornecedor ativo ou sem preço.
 		if !cand.fornecedorAtivo || !cand.modeloAtivo {
 			msg := "Modelo ou fornecedor desativado."
-			if err := a.registrarTentativaSemExecucao(ctx, cand, precos, correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, "falha", msg); err != nil {
+			if err := a.registrarTentativaSemExecucaoEm(ctx, a.banco, cand, precos, correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, "falha", msg); err != nil {
 				slog.Error("falha ao registrar tentativa", "erro", err)
 				return ResultadoAtividade{}, 500, "falha_interna", "Algo deu errado. Tente de novo."
 			}
@@ -556,7 +556,7 @@ func (a *API) executarAtividade(ctx context.Context, atividade, orgID, usuarioID
 		}
 		if !precos.completoPara(cand.servico) {
 			msg := "Modelo sem preço vigente."
-			if err := a.registrarTentativaSemExecucao(ctx, cand, precos, correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, "falha", msg); err != nil {
+			if err := a.registrarTentativaSemExecucaoEm(ctx, a.banco, cand, precos, correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, "falha", msg); err != nil {
 				slog.Error("falha ao registrar tentativa", "erro", err)
 				return ResultadoAtividade{}, 500, "falha_interna", "Algo deu errado. Tente de novo."
 			}
@@ -565,31 +565,27 @@ func (a *API) executarAtividade(ctx context.Context, atividade, orgID, usuarioID
 			continue
 		}
 
-		// Verificação de limite mensal (AC34).
-		noLimite, err := a.candidatoNoLimite(ctx, cand)
-		if err != nil {
-			slog.Error("falha ao verificar limite", "erro", err)
-			return ResultadoAtividade{}, 500, "falha_interna", "Algo deu errado. Tente de novo."
-		}
-		if noLimite {
-			msg := "Limite mensal atingido."
-			if err := a.registrarTentativaSemExecucao(ctx, cand, precos, correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, "pulado_limite", msg); err != nil {
-				slog.Error("falha ao registrar pulo por limite", "erro", err)
-				return ResultadoAtividade{}, 500, "falha_interna", "Algo deu errado. Tente de novo."
-			}
-			tentativas = append(tentativas, Tentativa{Modelo: cand.resumo(), Status: "pulado_limite", Erro: &msg})
-			continue
-		}
-
-		todosPuladoLimite = false
-		_, texto, imagemURL, tokensIn, tokensOut, imgs, custoUsd, err := a.executarEGerar(
-			ctx, cand, precos, correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, prompt,
+		res, err := a.executarComTrava(
+			ctx, cand, precos, correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, prompt, true,
 		)
 		if err != nil {
+			var ef *erroFornecedor
+			var ee *erroEnderecoExecucao
+			if !errors.As(err, &ef) && !errors.As(err, &ee) {
+				// Falha interna ou ao gravar no banco não cai na reserva.
+				return ResultadoAtividade{}, 500, "falha_interna", "Algo deu errado. Tente de novo."
+			}
+			todosPuladoLimite = false
 			msg := err.Error()
 			tentativas = append(tentativas, Tentativa{Modelo: cand.resumo(), Status: "falha", Erro: &msg})
 			continue
 		}
+		if res.puladoLimite {
+			msg := "Limite mensal atingido."
+			tentativas = append(tentativas, Tentativa{Modelo: cand.resumo(), Status: "pulado_limite", Erro: &msg})
+			continue
+		}
+
 		tentativas = append(tentativas, Tentativa{Modelo: cand.resumo(), Status: "ok"})
 		return ResultadoAtividade{
 			CorrelacaoID:        correlacaoID,
@@ -597,12 +593,12 @@ func (a *API) executarAtividade(ctx context.Context, atividade, orgID, usuarioID
 			AtendidoPor:         cand.resumo(),
 			AtendidoPelaReserva: par.reserva,
 			Tentativas:          tentativas,
-			Texto:               texto,
-			ImagemDataUrl:       imagemURL,
-			TokensEntrada:       tokensIn,
-			TokensSaida:         tokensOut,
-			Imagens:             imgs,
-			CustoUsd:            custoUsd,
+			Texto:               res.texto,
+			ImagemDataUrl:       res.imagemURL,
+			TokensEntrada:       res.tokensIn,
+			TokensSaida:         res.tokensOut,
+			Imagens:             res.imgs,
+			CustoUsd:            res.custoUsd,
 			Simulado:            cand.fornecedorTipo == "simulado",
 		}, 0, "", ""
 	}
@@ -613,13 +609,50 @@ func (a *API) executarAtividade(ctx context.Context, atividade, orgID, usuarioID
 	return ResultadoAtividade{}, 502, "atividade_falhou", "Não foi possível concluir a atividade pelos modelos configurados."
 }
 
+type executorSQL interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 type erroEnderecoExecucao struct {
 	mensagem string
 }
 
 func (e *erroEnderecoExecucao) Error() string { return e.mensagem }
 
-func (a *API) executarEGerar(
+type erroInternoExecucao struct {
+	err error
+}
+
+func (e *erroInternoExecucao) Error() string { return "Algo deu errado. Tente de novo." }
+func (e *erroInternoExecucao) Unwrap() error { return e.err }
+
+type resultadoExecucao struct {
+	execucaoID   string
+	texto        *string
+	imagemURL    *string
+	tokensIn     int
+	tokensOut    int
+	imgs         int
+	custoUsd     float64
+	puladoLimite bool
+}
+
+func chaveTravaFornecedor(fornecedorID string) (int32, int32) {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte("laura-growth:ia_limite:" + fornecedorID))
+	soma := h.Sum64()
+	return int32(soma >> 32), int32(soma)
+}
+
+func travarFornecedorTx(ctx context.Context, tx pgx.Tx, fornecedorID string) error {
+	k1, k2 := chaveTravaFornecedor(fornecedorID)
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2)`, k1, k2)
+	return err
+}
+
+// executarComTrava serializa a conferência de limite mensal e a gravação da execução por fornecedor
+// usando pg_advisory_xact_lock na transação.
+func (a *API) executarComTrava(
 	ctx context.Context,
 	cand candidatoExecucao,
 	precos precosVigentesTexto,
@@ -627,22 +660,100 @@ func (a *API) executarEGerar(
 	tentativa int,
 	atendidoPelaReserva bool,
 	prompt string,
-) (execucaoID string, texto, imagemURL *string, tokensIn, tokensOut, imgs int, custoUsd float64, errRet error) {
+	registrarPuloLimite bool,
+) (resultadoExecucao, error) {
+	tx, err := a.banco.Begin(ctx)
+	if err != nil {
+		slog.Error("falha ao iniciar transação de execução", "atividade", atividade, "modeloId", cand.modeloID, "erro", err)
+		return resultadoExecucao{}, &erroInternoExecucao{err: err}
+	}
+	defer tx.Rollback(context.Background())
+
+	if err := travarFornecedorTx(ctx, tx, cand.fornecedorID); err != nil {
+		slog.Error("falha ao travar limite do fornecedor", "fornecedorId", cand.fornecedorID, "erro", err)
+		return resultadoExecucao{}, &erroInternoExecucao{err: err}
+	}
+
+	noLimite, err := a.candidatoNoLimiteEm(ctx, tx, cand)
+	if err != nil {
+		slog.Error("falha ao verificar limite", "fornecedorId", cand.fornecedorID, "modeloId", cand.modeloID, "erro", err)
+		return resultadoExecucao{}, &erroInternoExecucao{err: err}
+	}
+	if noLimite {
+		if registrarPuloLimite {
+			if err := a.registrarTentativaSemExecucaoEm(
+				ctx, tx, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "pulado_limite", "Limite mensal atingido.",
+			); err != nil {
+				slog.Error("falha ao registrar pulo por limite", "atividade", atividade, "modeloId", cand.modeloID, "erro", err)
+				return resultadoExecucao{}, &erroInternoExecucao{err: err}
+			}
+			if err := tx.Commit(ctx); err != nil {
+				slog.Error("falha ao confirmar pulo por limite", "atividade", atividade, "modeloId", cand.modeloID, "erro", err)
+				return resultadoExecucao{}, &erroInternoExecucao{err: err}
+			}
+		}
+		return resultadoExecucao{puladoLimite: true}, nil
+	}
+
+	res, errExec := a.executarEGerarEm(
+		ctx, tx, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, prompt,
+	)
+	if errExec != nil {
+		var ei *erroInternoExecucao
+		if errors.As(errExec, &ei) {
+			return resultadoExecucao{}, errExec
+		}
+		if err := tx.Commit(ctx); err != nil {
+			slog.Error("falha ao confirmar registro de tentativa", "atividade", atividade, "modeloId", cand.modeloID, "erro", err)
+			return resultadoExecucao{}, &erroInternoExecucao{err: err}
+		}
+		return resultadoExecucao{}, errExec
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		slog.Error("falha ao confirmar registro de execução", "atividade", atividade, "modeloId", cand.modeloID, "erro", err)
+		return resultadoExecucao{}, &erroInternoExecucao{err: err}
+	}
+	return res, nil
+}
+
+func (a *API) executarEGerarEm(
+	ctx context.Context,
+	exec executorSQL,
+	cand candidatoExecucao,
+	precos precosVigentesTexto,
+	correlacaoID, atividade, orgID, usuarioID string,
+	tentativa int,
+	atendidoPelaReserva bool,
+	prompt string,
+) (resultadoExecucao, error) {
 	var chave string
 	endereco := cand.endereco
 	if cand.fornecedorTipo != "simulado" {
 		enderecoValidado, err := a.resolverEnderecoFornecedor(ctx, cand.fornecedorTipo, endereco)
 		if err != nil {
-			_ = a.registrarTentativaSemExecucao(ctx, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", err.Error())
-			return "", nil, nil, 0, 0, 0, 0, &erroEnderecoExecucao{mensagem: err.Error()}
+			msg := err.Error()
+			if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", msg); errReg != nil {
+				slog.Error("falha ao registrar tentativa com endereço inválido", "fornecedorId", cand.fornecedorID, "erro", errReg)
+				return resultadoExecucao{}, &erroInternoExecucao{err: errReg}
+			}
+			return resultadoExecucao{}, &erroEnderecoExecucao{mensagem: msg}
 		}
 		endereco = enderecoValidado
 		if a.cifrador == nil {
-			return "", nil, nil, 0, 0, 0, 0, errors.New("cifrador não configurado")
+			errCfg := errors.New("cifrador não configurado")
+			slog.Error("cifrador não configurado ao executar modelo", "fornecedorId", cand.fornecedorID)
+			return resultadoExecucao{}, &erroInternoExecucao{err: errCfg}
 		}
 		chave, err = a.cifrador.decifrar(cand.fornecedorID, cand.chaveCifrada)
 		if err != nil {
-			return "", nil, nil, 0, 0, 0, 0, err
+			slog.Error("falha ao decifrar chave do fornecedor", "fornecedorId", cand.fornecedorID)
+			msg := "Não foi possível ler a chave salva; cadastre-a de novo."
+			if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", msg); errReg != nil {
+				slog.Error("falha ao registrar tentativa com chave ilegível", "fornecedorId", cand.fornecedorID, "erro", errReg)
+				return resultadoExecucao{}, &erroInternoExecucao{err: errReg}
+			}
+			return resultadoExecucao{}, &erroFornecedor{codigo: "fornecedor_erro", mensagem: msg}
 		}
 	}
 
@@ -652,45 +763,75 @@ func (a *API) executarEGerar(
 	}
 	con, err := novoConector(cand.fornecedorTipo, endereco, chave, a.clienteHTTPFornecedor(timeout))
 	if err != nil {
-		_ = a.registrarTentativaSemExecucao(ctx, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", err.Error())
-		return "", nil, nil, 0, 0, 0, 0, err
+		var ef *erroFornecedor
+		if !errors.As(err, &ef) {
+			slog.Error("falha interna ao criar conector", "fornecedorId", cand.fornecedorID, "erro", err)
+			return resultadoExecucao{}, &erroInternoExecucao{err: err}
+		}
+		if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", ef.mensagem); errReg != nil {
+			slog.Error("falha ao registrar tentativa do conector", "fornecedorId", cand.fornecedorID, "erro", errReg)
+			return resultadoExecucao{}, &erroInternoExecucao{err: errReg}
+		}
+		return resultadoExecucao{}, ef
 	}
 
+	var res resultadoExecucao
 	if cand.servico == "imagem" {
 		resp, err := con.gerarImagem(ctx, cand.identificador, prompt)
 		if err != nil {
-			_ = a.registrarTentativaSemExecucao(ctx, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", err.Error())
-			return "", nil, nil, 0, 0, 0, 0, err
+			var ef *erroFornecedor
+			if !errors.As(err, &ef) {
+				slog.Error("falha interna ao gerar imagem no fornecedor", "fornecedorId", cand.fornecedorID, "modeloId", cand.modeloID, "erro", err)
+				return resultadoExecucao{}, &erroInternoExecucao{err: err}
+			}
+			if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", ef.mensagem); errReg != nil {
+				slog.Error("falha ao registrar tentativa de imagem", "fornecedorId", cand.fornecedorID, "modeloId", cand.modeloID, "erro", errReg)
+				return resultadoExecucao{}, &erroInternoExecucao{err: errReg}
+			}
+			return resultadoExecucao{}, ef
 		}
-		imgs = resp.Imagens
-		tokensIn = resp.TokensEntrada
-		tokensOut = resp.TokensSaida
-		imagemURL = &resp.ImagemDataUrl
+		res.imgs = resp.Imagens
+		res.tokensIn = resp.TokensEntrada
+		res.tokensOut = resp.TokensSaida
+		res.imagemURL = &resp.ImagemDataUrl
 	} else {
 		resp, err := con.gerarTexto(ctx, cand.identificador, prompt)
 		if err != nil {
-			_ = a.registrarTentativaSemExecucao(ctx, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", err.Error())
-			return "", nil, nil, 0, 0, 0, 0, err
+			var ef *erroFornecedor
+			if !errors.As(err, &ef) {
+				slog.Error("falha interna ao gerar texto no fornecedor", "fornecedorId", cand.fornecedorID, "modeloId", cand.modeloID, "erro", err)
+				return resultadoExecucao{}, &erroInternoExecucao{err: err}
+			}
+			if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", ef.mensagem); errReg != nil {
+				slog.Error("falha ao registrar tentativa de texto", "fornecedorId", cand.fornecedorID, "modeloId", cand.modeloID, "erro", errReg)
+				return resultadoExecucao{}, &erroInternoExecucao{err: errReg}
+			}
+			return resultadoExecucao{}, ef
 		}
-		tokensIn = resp.TokensEntrada
-		tokensOut = resp.TokensSaida
-		texto = &resp.Texto
+		res.tokensIn = resp.TokensEntrada
+		res.tokensOut = resp.TokensSaida
+		res.texto = &resp.Texto
 	}
 
-	custoSQL, custoFloat, err := calcularCustoExato(tokensIn, tokensOut, imgs, precos)
+	custoSQL, custoFloat, err := calcularCustoExato(res.tokensIn, res.tokensOut, res.imgs, precos)
 	if err != nil {
-		return "", nil, nil, 0, 0, 0, 0, err
+		slog.Error("falha ao calcular custo da execução", "modeloId", cand.modeloID, "erro", err)
+		return resultadoExecucao{}, &erroInternoExecucao{err: err}
 	}
 
-	execucaoID, err = a.inserirExecucao(ctx, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "ok", nil, tokensIn, tokensOut, imgs, custoSQL)
+	execucaoID, err := a.inserirExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "ok", nil, res.tokensIn, res.tokensOut, res.imgs, custoSQL)
 	if err != nil {
-		return "", nil, nil, 0, 0, 0, 0, err
+		slog.Error("falha ao gravar execução de IA", "atividade", atividade, "modeloId", cand.modeloID, "erro", err)
+		return resultadoExecucao{}, &erroInternoExecucao{err: err}
 	}
-	return execucaoID, texto, imagemURL, tokensIn, tokensOut, imgs, custoFloat, nil
+	res.execucaoID = execucaoID
+	res.custoUsd = custoFloat
+	return res, nil
 }
 
-func (a *API) registrarTentativaSemExecucao(
+func (a *API) registrarTentativaSemExecucaoEm(
 	ctx context.Context,
+	exec executorSQL,
 	cand candidatoExecucao,
 	precos precosVigentesTexto,
 	correlacaoID, atividade, orgID, usuarioID string,
@@ -698,12 +839,13 @@ func (a *API) registrarTentativaSemExecucao(
 	atendidoPelaReserva bool,
 	status, msgErro string,
 ) error {
-	_, err := a.inserirExecucao(ctx, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, status, &msgErro, 0, 0, 0, "0.00000000")
+	_, err := a.inserirExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, status, &msgErro, 0, 0, 0, "0.00000000")
 	return err
 }
 
-func (a *API) inserirExecucao(
+func (a *API) inserirExecucaoEm(
 	ctx context.Context,
+	exec executorSQL,
 	cand candidatoExecucao,
 	precos precosVigentesTexto,
 	correlacaoID, atividade, orgID, usuarioID string,
@@ -722,7 +864,7 @@ func (a *API) inserirExecucao(
 		userParam = &usuarioID
 	}
 	var id string
-	err := a.banco.QueryRow(ctx, `
+	err := exec.QueryRow(ctx, `
 		INSERT INTO ia_execucoes (
 			correlacao_id, atividade, organizacao_id, usuario_id,
 			fornecedor_id, modelo_id, fornecedor_nome, modelo_identificador,
@@ -849,9 +991,9 @@ func (a *API) carregarPrecosVigentesTexto(ctx context.Context, modeloID, dataISO
 	return p, linhas.Err()
 }
 
-// candidatoNoLimite confere o limite mensal no fuso America/Sao_Paulo.
+// candidatoNoLimiteEm confere o limite mensal no fuso America/Sao_Paulo dentro da consulta/transação informada.
 // Quando o modelo tem limite próprio, ele vale no lugar do limite do fornecedor (AC34).
-func (a *API) candidatoNoLimite(ctx context.Context, cand candidatoExecucao) (bool, error) {
+func (a *API) candidatoNoLimiteEm(ctx context.Context, exec executorSQL, cand candidatoExecucao) (bool, error) {
 	inicioMes := inicioMesSaoPaulo(a.agora())
 	proximoMes := inicioMes.AddDate(0, 1, 0)
 
@@ -863,7 +1005,7 @@ func (a *API) candidatoNoLimite(ctx context.Context, cand candidatoExecucao) (bo
 
 	if cand.limiteModeloStr != nil {
 		limiteStr = *cand.limiteModeloStr
-		err := a.banco.QueryRow(ctx, `
+		err := exec.QueryRow(ctx, `
 			SELECT COALESCE(sum(custo_usd), 0)::text
 			FROM ia_execucoes
 			WHERE modelo_id::text = $1 AND criado_em >= $2 AND criado_em < $3`,
@@ -873,7 +1015,7 @@ func (a *API) candidatoNoLimite(ctx context.Context, cand candidatoExecucao) (bo
 		}
 	} else {
 		limiteStr = cand.limiteFornStr
-		err := a.banco.QueryRow(ctx, `
+		err := exec.QueryRow(ctx, `
 			SELECT COALESCE(sum(custo_usd), 0)::text
 			FROM ia_execucoes
 			WHERE fornecedor_id::text = $1 AND criado_em >= $2 AND criado_em < $3`,

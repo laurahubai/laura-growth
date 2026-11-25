@@ -1,8 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -109,16 +116,20 @@ func TestAC29AC35TestarModeloTextoEImagem(t *testing.T) {
 		t.Fatalf("resultado teste imagem inesperado: %+v", resImg)
 	}
 
-	// Confere os registros gravados em GET /api/admin/execucoes (mais recentes primeiro).
+	// Confere os registros gravados em GET /api/admin/execucoes (mais recentes primeiro), com organizacao_id = NULL (teste da plataforma).
 	var execs RespostaExecucoes
 	if st := c.pedir("GET", "/api/admin/execucoes?limite=10", nil, &execs); st != 200 || len(execs.Execucoes) != 2 {
 		t.Fatalf("execuções inesperadas: %d %+v", st, execs.Execucoes)
 	}
-	if execs.Execucoes[0].ID != resImg.ExecucaoID || execs.Execucoes[0].Atividade != "teste" || !execs.Execucoes[0].Simulado || execs.Execucoes[0].CustoUsd != 0.05 {
+	if execs.Execucoes[0].ID != resImg.ExecucaoID || execs.Execucoes[0].Atividade != "teste" || !execs.Execucoes[0].Simulado || execs.Execucoes[0].CustoUsd != 0.05 || execs.Execucoes[0].OrganizacaoNome != nil {
 		t.Fatalf("registro da execução de imagem inesperado: %+v", execs.Execucoes[0])
 	}
-	if execs.Execucoes[1].ID != resTxt.ExecucaoID || execs.Execucoes[1].TokensEntrada != 12 || execs.Execucoes[1].TokensSaida != 18 || execs.Execucoes[1].CustoUsd != 0.048 {
+	if execs.Execucoes[1].ID != resTxt.ExecucaoID || execs.Execucoes[1].TokensEntrada != 12 || execs.Execucoes[1].TokensSaida != 18 || execs.Execucoes[1].CustoUsd != 0.048 || execs.Execucoes[1].OrganizacaoNome != nil {
 		t.Fatalf("registro da execução de texto inesperado: %+v", execs.Execucoes[1])
+	}
+	var comOrg int
+	if err := api.banco.QueryRow(context.Background(), `SELECT count(*) FROM ia_execucoes WHERE organizacao_id IS NOT NULL`).Scan(&comOrg); err != nil || comOrg != 0 {
+		t.Fatalf("testar modelo deveria gravar organizacao_id = NULL, encontrou %d com org (err=%v)", comOrg, err)
 	}
 
 	// Modelo inativo -> 409 modelo_inativo.
@@ -191,7 +202,7 @@ func TestAC33FallbackPrincipalParaReserva(t *testing.T) {
 		t.Fatalf("resultado fallback inesperado: %+v", res)
 	}
 
-	// Confere os dois registros em ia_execucoes com a mesma correlação.
+	// Confere os dois registros em ia_execucoes com a mesma correlação e organizacao_id = NULL (teste da plataforma).
 	var execs RespostaExecucoes
 	if st := c.pedir("GET", "/api/admin/execucoes", nil, &execs); st != 200 || len(execs.Execucoes) != 2 {
 		t.Fatalf("execuções esperadas = 2, veio %d (%+v)", st, execs.Execucoes)
@@ -200,11 +211,15 @@ func TestAC33FallbackPrincipalParaReserva(t *testing.T) {
 	if t1.CorrelacaoID != res.CorrelacaoID || t2.CorrelacaoID != res.CorrelacaoID {
 		t.Fatalf("correlação diferente: %+v %+v", t1, t2)
 	}
-	if t1.Status != "falha" || t1.Erro == nil || t1.Tentativa != 1 || t1.AtendidoPelaReserva {
+	if t1.Status != "falha" || t1.Erro == nil || t1.Tentativa != 1 || t1.AtendidoPelaReserva || t1.OrganizacaoNome != nil {
 		t.Fatalf("tentativa 1 inesperada: %+v", t1)
 	}
-	if t2.Status != "ok" || t2.Tentativa != 2 || !t2.AtendidoPelaReserva || t2.ModeloIdentificador != "simulado-texto-reserva" {
+	if t2.Status != "ok" || t2.Tentativa != 2 || !t2.AtendidoPelaReserva || t2.ModeloIdentificador != "simulado-texto-reserva" || t2.OrganizacaoNome != nil {
 		t.Fatalf("tentativa 2 inesperada: %+v", t2)
+	}
+	var comOrg int
+	if err := api.banco.QueryRow(context.Background(), `SELECT count(*) FROM ia_execucoes WHERE organizacao_id IS NOT NULL`).Scan(&comOrg); err != nil || comOrg != 0 {
+		t.Fatalf("testar atividade deveria gravar organizacao_id = NULL, encontrou %d com org (err=%v)", comOrg, err)
 	}
 }
 
@@ -353,13 +368,23 @@ func TestAC30UsoSoDaCasaERotas403S3(t *testing.T) {
 		t.Fatalf("organização fora da casa deveria cair na reserva, veio st=%d %+v", st, resFora)
 	}
 
-	// Se reserva também for "casa", recusa para organização de fora da casa (502 atividade_falhou).
+	// Organização vazia ("") também NUNCA usa fornecedor "casa" (padrão seguro: orgDaCasa = false).
+	resVazia, st, _, _ := api.executarAtividade(context.Background(), "chat_cmo", "", "", "Oi")
+	if st != 0 || !resVazia.AtendidoPelaReserva || resVazia.AtendidoPor.ID != modTodas || resVazia.Tentativas[0].Status != "falha" {
+		t.Fatalf("org vazia não deveria usar principal 'casa', veio st=%d %+v", st, resVazia)
+	}
+
+	// Se reserva também for "casa", recusa para organização de fora da casa (502 atividade_falhou) e para org vazia.
 	c.pedir("PUT", "/api/admin/atividades/revisao", map[string]any{
 		"modeloPrincipalId": modCasa, "modeloReservaId": criarComPreco(fornCasa.ID, "simulado-casa-2"),
 	}, nil)
 	_, st, cod, _ := api.executarAtividade(context.Background(), "revisao", alheiaID, "", "Oi")
 	if st != 502 || cod != "atividade_falhou" {
 		t.Fatalf("dois modelos 'casa' para org externa esperava 502 atividade_falhou, veio %d %s", st, cod)
+	}
+	_, st, cod, _ = api.executarAtividade(context.Background(), "revisao", "", "", "Oi")
+	if st != 502 || cod != "atividade_falhou" {
+		t.Fatalf("dois modelos 'casa' para org vazia esperava 502 atividade_falhou, veio %d %s", st, cod)
 	}
 
 	// Pessoa comum recebe 403 em todas as novas rotas da S3.
@@ -377,5 +402,251 @@ func TestAC30UsoSoDaCasaERotas403S3(t *testing.T) {
 		if st, body := comum.pedirComCorpo(rt.m, rt.p, map[string]any{}); st != 403 || !strings.Contains(string(body), "sem_permissao") {
 			t.Fatalf("%s %s para comum esperava 403 sem_permissao, veio %d (%s)", rt.m, rt.p, st, body)
 		}
+	}
+}
+
+func TestFalhaAoGravarExecucaoParaComErroInternoSemReservaEVazarBanco(t *testing.T) {
+	api := novaAPIAdminTeste(t)
+	c := novoCliente(t, api)
+	entrarComoPaulo(t, c)
+
+	_, modTxt, modFalha, modTxtReserva, _, _ := prepararSimuladosCompletos(t, c)
+	if st := c.pedir("PUT", "/api/admin/atividades/plano", map[string]any{
+		"modeloPrincipalId": modTxt, "modeloReservaId": modTxtReserva,
+	}, nil); st != 200 {
+		t.Fatalf("PUT plano falhou: %d", st)
+	}
+	if st := c.pedir("PUT", "/api/admin/atividades/pauta", map[string]any{
+		"modeloPrincipalId": modFalha, "modeloReservaId": modTxtReserva,
+	}, nil); st != 200 {
+		t.Fatalf("PUT pauta falhou: %d", st)
+	}
+
+	ctx := context.Background()
+	if _, err := api.banco.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION falhar_insert_execucao_teste() RETURNS trigger AS $$
+		BEGIN
+			RAISE EXCEPTION 'falha_banco_interna_secreta';
+		END;
+		$$ LANGUAGE plpgsql;
+		CREATE TRIGGER trg_falhar_insert_execucao_teste
+		BEFORE INSERT ON ia_execucoes
+		FOR EACH ROW EXECUTE FUNCTION falhar_insert_execucao_teste();`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = api.banco.Exec(ctx, `DROP TRIGGER IF EXISTS trg_falhar_insert_execucao_teste ON ia_execucoes; DROP FUNCTION IF EXISTS falhar_insert_execucao_teste();`)
+	})
+
+	var bufLog bytes.Buffer
+	anterior := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&bufLog, nil)))
+	defer slog.SetDefault(anterior)
+
+	// 1. Atividade com principal bem-sucedido cuja gravação em ia_execucoes falha:
+	//    NÃO cai na reserva; responde 500 falha_interna genérica sem texto cru do banco.
+	st, body := c.pedirComCorpo("POST", "/api/admin/atividades/plano/testar", nil)
+	if st != 500 || !strings.Contains(string(body), "falha_interna") || !strings.Contains(string(body), "Algo deu errado") {
+		t.Fatalf("esperava 500 falha_interna genérica, veio %d (%s)", st, body)
+	}
+	if strings.Contains(string(body), "falha_banco_interna_secreta") {
+		t.Fatalf("resposta vazou erro cru do banco: %s", body)
+	}
+
+	// 2. Atividade com principal que falha e gravação da tentativa falha:
+	//    também NÃO cai na reserva; para com 500 falha_interna.
+	st, body = c.pedirComCorpo("POST", "/api/admin/atividades/pauta/testar", nil)
+	if st != 500 || !strings.Contains(string(body), "falha_interna") || strings.Contains(string(body), "falha_banco_interna_secreta") {
+		t.Fatalf("esperava 500 falha_interna sem vazar banco, veio %d (%s)", st, body)
+	}
+
+	// 3. Testar modelo com falha de gravação: 500 falha_interna sem texto cru do banco.
+	st, body = c.pedirComCorpo("POST", "/api/admin/modelos/"+modTxt+"/testar", nil)
+	if st != 500 || !strings.Contains(string(body), "falha_interna") || strings.Contains(string(body), "falha_banco_interna_secreta") {
+		t.Fatalf("testar modelo esperava 500 falha_interna sem vazar banco, veio %d (%s)", st, body)
+	}
+
+	var total int
+	if err := api.banco.QueryRow(ctx, `SELECT count(*) FROM ia_execucoes`).Scan(&total); err != nil || total != 0 {
+		t.Fatalf("nenhuma execução deveria ter sido gravada (nem reserva), total=%d err=%v", total, err)
+	}
+	if !strings.Contains(bufLog.String(), "falha_banco_interna_secreta") {
+		t.Fatalf("slog deveria registrar detalhes do erro interno, veio: %s", bufLog.String())
+	}
+}
+
+func TestFalhaDecifrarChaveRegistraExecucaoECaiNaReserva(t *testing.T) {
+	api := novaAPIAdminTeste(t)
+	c := novoCliente(t, api)
+	entrarComoPaulo(t, c)
+
+	var fornExt Fornecedor
+	if st := c.pedir("POST", "/api/admin/fornecedores", map[string]any{
+		"nome":            "OpenAI Chave Corrompida",
+		"tipo":            "compativel_openai",
+		"endereco":        "https://api.openai.com/v1",
+		"chave":           chaveAPITeste,
+		"limiteMensalUsd": 50,
+	}, &fornExt); st != 201 {
+		t.Fatalf("criar fornecedor externo falhou: %d", st)
+	}
+	var modExt Modelo
+	if st := c.pedir("POST", "/api/admin/fornecedores/"+fornExt.ID+"/modelos", map[string]any{
+		"identificador": "gpt-corrompido", "servico": "texto", "origem": "manual",
+	}, &modExt); st != 201 {
+		t.Fatalf("criar modelo externo falhou: %d", st)
+	}
+	c.pedir("POST", "/api/admin/modelos/"+modExt.ID+"/precos", map[string]any{
+		"unidade": "token_entrada", "precoUsd": 10, "vigenciaInicio": "2026-11-01",
+	}, nil)
+	c.pedir("POST", "/api/admin/modelos/"+modExt.ID+"/precos", map[string]any{
+		"unidade": "token_saida", "precoUsd": 10, "vigenciaInicio": "2026-11-01",
+	}, nil)
+
+	_, _, _, modTxtReserva, _, _ := prepararSimuladosCompletos(t, c)
+	if st := c.pedir("PUT", "/api/admin/atividades/texto", map[string]any{
+		"modeloPrincipalId": modExt.ID, "modeloReservaId": modTxtReserva,
+	}, nil); st != 200 {
+		t.Fatalf("PUT texto falhou: %d", st)
+	}
+
+	// Corrompe chave_cifrada no banco.
+	ctx := context.Background()
+	if _, err := api.banco.Exec(ctx, `UPDATE ia_fornecedores SET chave_cifrada = E'\\x010203' WHERE id::text = $1`, fornExt.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	var bufLog bytes.Buffer
+	anterior := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&bufLog, nil)))
+	defer slog.SetDefault(anterior)
+
+	// Atividade: grava falha com mensagem fixa e segue para a reserva.
+	var res ResultadoAtividade
+	if st := c.pedir("POST", "/api/admin/atividades/texto/testar", nil, &res); st != 200 {
+		t.Fatalf("atividade com chave corrompida no principal esperava 200 via reserva, veio %d", st)
+	}
+	const msgEsperada = "Não foi possível ler a chave salva; cadastre-a de novo."
+	if !res.AtendidoPelaReserva || res.AtendidoPor.ID != modTxtReserva || len(res.Tentativas) != 2 ||
+		res.Tentativas[0].Status != "falha" || res.Tentativas[0].Erro == nil || *res.Tentativas[0].Erro != msgEsperada ||
+		res.Tentativas[1].Status != "ok" {
+		t.Fatalf("resultado inesperado na falha de decifragem: %+v", res)
+	}
+
+	var statusDB, erroDB string
+	if err := api.banco.QueryRow(ctx, `
+		SELECT status, erro FROM ia_execucoes WHERE correlacao_id::text = $1 AND tentativa = 1`,
+		res.CorrelacaoID).Scan(&statusDB, &erroDB); err != nil {
+		t.Fatal(err)
+	}
+	if statusDB != "falha" || erroDB != msgEsperada {
+		t.Fatalf("registro no banco inesperado: status=%q erro=%q", statusDB, erroDB)
+	}
+
+	// Testar modelo diretamente também grava falha e devolve 502 com a mensagem fixa.
+	st, body := c.pedirComCorpo("POST", "/api/admin/modelos/"+modExt.ID+"/testar", nil)
+	if st != 502 || !strings.Contains(string(body), msgEsperada) {
+		t.Fatalf("testar modelo com chave corrompida esperava 502 com mensagem fixa, veio %d (%s)", st, body)
+	}
+	var totalFalhas int
+	if err := api.banco.QueryRow(ctx, `
+		SELECT count(*) FROM ia_execucoes WHERE fornecedor_id::text = $1 AND status = 'falha' AND erro = $2`,
+		fornExt.ID, msgEsperada).Scan(&totalFalhas); err != nil || totalFalhas != 2 {
+		t.Fatalf("esperava 2 falhas registradas por chave ilegível, veio %d (err=%v)", totalFalhas, err)
+	}
+
+	logs := bufLog.String()
+	if !strings.Contains(logs, "fornecedorId="+fornExt.ID) {
+		t.Fatalf("slog.Error deveria conter fornecedorId=%s, veio: %s", fornExt.ID, logs)
+	}
+	if strings.Contains(logs, chaveAPITeste) || strings.Contains(logs, chaveCifragemTeste) {
+		t.Fatalf("logs vazaram segredo: %s", logs)
+	}
+}
+
+func TestConcorrenciaLimiteSerializadaPorTrava(t *testing.T) {
+	api := novaAPIAdminTeste(t)
+	agoraFixo := time.Date(2026, 11, 25, 14, 0, 0, 0, fusoSaoPaulo)
+	api.agora = func() time.Time { return agoraFixo }
+
+	var chamadas atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/chat/completions" {
+			chamadas.Add(1)
+			// Pequena pausa para garantir sobreposição sem a trava transacional.
+			time.Sleep(60 * time.Millisecond)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []map[string]any{{"message": map[string]string{"content": "ok"}}},
+				"usage":   map[string]int{"prompt_tokens": 3000, "completion_tokens": 2000},
+			})
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+
+	api.permitirRedeInterna = true
+	api.tlsTeste = srv.Client().Transport.(*http.Transport).TLSClientConfig
+
+	c := novoCliente(t, api)
+	entrarComoPaulo(t, c)
+
+	var forn Fornecedor
+	if st := c.pedir("POST", "/api/admin/fornecedores", map[string]any{
+		"nome":            "OpenAI Concorrência",
+		"tipo":            "compativel_openai",
+		"endereco":        srv.URL + "/v1",
+		"chave":           chaveAPITeste,
+		"limiteMensalUsd": 0.05,
+	}, &forn); st != 201 {
+		t.Fatalf("criar fornecedor falhou: %d", st)
+	}
+	var mod Modelo
+	if st := c.pedir("POST", "/api/admin/fornecedores/"+forn.ID+"/modelos", map[string]any{
+		"identificador": "gpt-race", "servico": "texto", "origem": "manual",
+	}, &mod); st != 201 {
+		t.Fatalf("criar modelo falhou: %d", st)
+	}
+	// 3000 * 10000/1e6 + 2000 * 10000/1e6 = 0.03 + 0.02 = 0.05 USD (atinge o limite na 1a chamada).
+	c.pedir("POST", "/api/admin/modelos/"+mod.ID+"/precos", map[string]any{
+		"unidade": "token_entrada", "precoUsd": 10000, "vigenciaInicio": "2026-11-01",
+	}, nil)
+	c.pedir("POST", "/api/admin/modelos/"+mod.ID+"/precos", map[string]any{
+		"unidade": "token_saida", "precoUsd": 10000, "vigenciaInicio": "2026-11-01",
+	}, nil)
+
+	const n = 4
+	largada := make(chan struct{})
+	resultados := make(chan int, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-largada
+			st, _ := c.pedirComCorpo("POST", "/api/admin/modelos/"+mod.ID+"/testar", nil)
+			resultados <- st
+		}()
+	}
+	close(largada)
+	wg.Wait()
+	close(resultados)
+
+	ok200, lim409 := 0, 0
+	for st := range resultados {
+		switch st {
+		case 200:
+			ok200++
+		case 409:
+			lim409++
+		default:
+			t.Fatalf("status inesperado na corrida de limite: %d", st)
+		}
+	}
+	if ok200 != 1 || lim409 != n-1 {
+		t.Fatalf("esperava 1 sucesso e %d bloqueios por limite, veio ok=%d lim=%d (chamadas=%d)", n-1, ok200, lim409, chamadas.Load())
+	}
+	if chamadas.Load() != 1 {
+		t.Fatalf("fornecedor deveria ser chamado apenas 1 vez, foi %d", chamadas.Load())
 	}
 }

@@ -389,6 +389,90 @@ func TestConectoresGeracaoTextoEImagem(t *testing.T) {
 	}
 }
 
+func TestValidacaoTokensFornecedor(t *testing.T) {
+	ctx := context.Background()
+	imgBase64 := base64.StdEncoding.EncodeToString(pngMinimo)
+
+	// Limites unitários (0 e 10.000.000 aceitos; negativos ou > 10.000.000 recusados com fornecedor_erro).
+	for _, tc := range []struct {
+		ent, sai int
+		valido   bool
+	}{
+		{0, 0, true},
+		{maxTokensFornecedor, maxTokensFornecedor, true},
+		{-1, 10, false},
+		{10, -1, false},
+		{maxTokensFornecedor + 1, 10, false},
+		{10, maxTokensFornecedor + 1, false},
+	} {
+		err := validarTokensFornecedor(tc.ent, tc.sai)
+		if tc.valido && err != nil {
+			t.Fatalf("validarTokensFornecedor(%d, %d) deveria aceitar, veio %v", tc.ent, tc.sai, err)
+		}
+		if !tc.valido {
+			var ef *erroFornecedor
+			if !errors.As(err, &ef) || ef.codigo != "fornecedor_erro" {
+				t.Fatalf("validarTokensFornecedor(%d, %d) esperava fornecedor_erro, veio %v", tc.ent, tc.sai, err)
+			}
+		}
+	}
+
+	var promptTok, compTok atomic.Int64
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []map[string]any{{"message": map[string]string{"content": "ok"}}},
+				"usage":   map[string]int64{"prompt_tokens": promptTok.Load(), "completion_tokens": compTok.Load()},
+			})
+		case "/v1/images/generations":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data":  []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]int64{"input_tokens": promptTok.Load(), "output_tokens": compTok.Load()},
+			})
+		case "/v1/messages":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"content": []map[string]string{{"type": "text", "text": "ok"}},
+				"usage":   map[string]int64{"input_tokens": promptTok.Load(), "output_tokens": compTok.Load()},
+			})
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+
+	conOAI, _ := novoConector("openai", srv.URL+"/v1", chaveAPITeste, srv.Client())
+	conAnt, _ := novoConector("anthropic", srv.URL+"/v1", chaveAPITeste, srv.Client())
+
+	promptTok.Store(maxTokensFornecedor + 1)
+	compTok.Store(10)
+	var ef *erroFornecedor
+	if _, err := conOAI.gerarTexto(ctx, "gpt-4o", "Oi"); !errors.As(err, &ef) || ef.codigo != "fornecedor_erro" {
+		t.Fatalf("OpenAI texto >10M tokens esperava fornecedor_erro, veio %v", err)
+	}
+	if _, err := conOAI.gerarImagem(ctx, "gpt-image-1", "Oi"); !errors.As(err, &ef) || ef.codigo != "fornecedor_erro" {
+		t.Fatalf("OpenAI imagem >10M tokens esperava fornecedor_erro, veio %v", err)
+	}
+	if _, err := conAnt.gerarTexto(ctx, "claude-sonnet-4-5", "Oi"); !errors.As(err, &ef) || ef.codigo != "fornecedor_erro" {
+		t.Fatalf("Anthropic texto >10M tokens esperava fornecedor_erro, veio %v", err)
+	}
+
+	promptTok.Store(0)
+	compTok.Store(-5)
+	if _, err := conOAI.gerarTexto(ctx, "gpt-4o", "Oi"); !errors.As(err, &ef) || ef.codigo != "fornecedor_erro" {
+		t.Fatalf("OpenAI texto tokens negativos esperava fornecedor_erro, veio %v", err)
+	}
+	if _, err := conAnt.gerarTexto(ctx, "claude-sonnet-4-5", "Oi"); !errors.As(err, &ef) || ef.codigo != "fornecedor_erro" {
+		t.Fatalf("Anthropic texto tokens negativos esperava fornecedor_erro, veio %v", err)
+	}
+
+	promptTok.Store(maxTokensFornecedor)
+	compTok.Store(0)
+	if rt, err := conOAI.gerarTexto(ctx, "gpt-4o", "Oi"); err != nil || rt.TokensEntrada != maxTokensFornecedor {
+		t.Fatalf("OpenAI exatamente 10M tokens deveria passar, veio %+v err=%v", rt, err)
+	}
+}
+
 func TestModelosEPrecosRegrasEVigencia(t *testing.T) {
 	api := novaAPIAdminTeste(t)
 	agoraFixo := time.Date(2026, 11, 25, 14, 0, 0, 0, fusoSaoPaulo)
