@@ -16,6 +16,8 @@ export const Usuario = z.object({
   id: z.string(),
   nome: z.string(),
   email: z.string(),
+  // Etapa 2A-1: só o administrador da plataforma vê a Administração (PRD 2.0 §3).
+  adminPlataforma: z.boolean(),
 });
 export type Usuario = z.infer<typeof Usuario>;
 
@@ -79,3 +81,5 @@ export type ArquivoMarca = z.infer<typeof ArquivoMarca>;
 
 export const RespostaKit = z.object({ kit: KitMarca, arquivos: z.array(ArquivoMarca) });
 export type RespostaKit = z.infer<typeof RespostaKit>;
+
+export * from "./admin";

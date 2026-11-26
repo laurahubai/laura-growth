@@ -19,5 +19,6 @@ Projetos têm **começo, fim e entrega**. Quando terminam, vão para [[Índice -
 | Plataforma Laura Growth (processo de posicionamento) | aprovado | [[Processo de Posicionamento Digital - Análise e Sugestões]] |
 | Plataforma Laura Growth (adequação ao PRD 2.0) | aprovado | [[Adequação ao PRD 2.0]] |
 | Plataforma Laura Growth (revisão do PRD 2.0 para a etapa 2A) | aprovado | [[Revisão PRD 2.0 - Etapa 2A]] |
+| Plataforma Laura Growth (spec da etapa 2A-1) | rascunho | [[Especificação - Etapa 2A-1]] |
 
 Modelo para novos: [[Template - Projeto]] · Voltar: [[Home]]

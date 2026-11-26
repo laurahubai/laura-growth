@@ -186,3 +186,29 @@ tr.clicavel:hover td { background: var(--laura-surface-subtle); }
   .stepper { grid-template-columns: repeat(3, 1fr); }
   .mock-aviso { display: none; }
 }
+
+/* Administração da plataforma */
+.topbar-admin {
+  background: var(--laura-primary);
+  color: var(--laura-text-inverse);
+  border-bottom-color: #11151c;
+}
+.topbar-admin .muted { color: #d0d5dd; }
+.topbar-admin .btn {
+  background: transparent;
+  border-color: rgb(255 255 255 / 0.25);
+  color: var(--laura-text-inverse);
+}
+.topbar-admin .btn:hover:not(:disabled) { background: var(--laura-primary-hover); }
+.topbar-admin :focus-visible { outline-color: #fff; }
+.admin-rotulo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.admin-faixa-avisos { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.girar { animation: gira 1s linear infinite; }
+@keyframes gira { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .girar { animation: none; } }
