@@ -317,7 +317,12 @@ test("B1, B2, B4, B6, B9: fluxo completo de convite → reenvio → aceite (cont
   await pageConvidado.getByRole("button", { name: "Criar conta e aceitar convite" }).click();
   await expect(pageConvidado).toHaveURL(/\/inicio$/);
 
-  // Convidado tem somente leitura: /kit abre sem botões de edição, /pessoas bloqueia com Sem acesso.
+  // Convidado tem somente leitura: vê apenas os menus permitidos, /kit abre sem botões de edição e /pessoas bloqueia com Sem acesso.
+  const menuConvidado = pageConvidado.getByRole("navigation", { name: "Menu principal" });
+  await expect(menuConvidado.getByRole("link", { name: "Início" })).toBeVisible();
+  await expect(menuConvidado.getByRole("link", { name: "Kit de marca" })).toBeVisible();
+  await expect(menuConvidado.getByRole("link", { name: "Pessoas" })).toHaveCount(0);
+
   await pageConvidado.goto("/kit");
   await expect(pageConvidado.getByText("Modo somente leitura")).toBeVisible();
   await expect(pageConvidado.getByRole("button", { name: "Salvar kit de marca" })).toHaveCount(0);
