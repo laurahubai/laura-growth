@@ -34,6 +34,40 @@ func validarBancoE2E(raw string) (string, error) {
 	return u, nil
 }
 
+func upsertMembroE2E(ctx context.Context, tx pgx.Tx, orgID, nome, email, senhaHash string, alcadas []string) error {
+	var usuarioID string
+	err := tx.QueryRow(ctx, `
+		INSERT INTO usuarios (nome, email, senha_hash, admin_plataforma)
+		VALUES ($1, $2, $3, false)
+		ON CONFLICT ((lower(email))) DO UPDATE
+			SET nome = EXCLUDED.nome,
+			    senha_hash = EXCLUDED.senha_hash,
+			    admin_plataforma = false
+		RETURNING id::text`, nome, email, senhaHash).Scan(&usuarioID)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO membros (organizacao_id, usuario_id, papel)
+		VALUES ($1, $2, 'membro')
+		ON CONFLICT (organizacao_id, usuario_id) DO UPDATE SET papel = 'membro'`, orgID, usuarioID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM alcadas_membro WHERE organizacao_id = $1::uuid AND usuario_id = $2::uuid`, orgID, usuarioID); err != nil {
+		return err
+	}
+	for _, al := range alcadas {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO alcadas_membro (organizacao_id, usuario_id, alcada)
+			VALUES ($1::uuid, $2::uuid, $3)
+			ON CONFLICT DO NOTHING`, orgID, usuarioID, al); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func main() {
 	bancoURL, err := validarBancoE2E(os.Getenv("LG_E2E_BANCO_URL"))
 	if err != nil {
@@ -51,6 +85,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "defina LG_E2E_OPERACAO_EMAIL")
 		os.Exit(2)
 	}
+	semAcessoEmail := strings.TrimSpace(os.Getenv("LG_E2E_SEM_ACESSO_EMAIL"))
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, bancoURL)
@@ -65,6 +100,12 @@ func main() {
 		if _, err := pool.Exec(ctx, `DELETE FROM usuarios WHERE lower(email) = lower($1)`, email); err != nil {
 			fmt.Fprintf(os.Stderr, "erro ao limpar usuário de teste: %v\n", err)
 			os.Exit(1)
+		}
+		if semAcessoEmail != "" {
+			if _, err := pool.Exec(ctx, `DELETE FROM usuarios WHERE lower(email) = lower($1)`, semAcessoEmail); err != nil {
+				fmt.Fprintf(os.Stderr, "erro ao limpar usuário sem acesso: %v\n", err)
+				os.Exit(1)
+			}
 		}
 		return
 	case "preparar":
@@ -92,20 +133,6 @@ func main() {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	var usuarioID string
-	err = tx.QueryRow(ctx, `
-		INSERT INTO usuarios (nome, email, senha_hash, admin_plataforma)
-		VALUES ('Operação E2E', $1, $2, false)
-		ON CONFLICT ((lower(email))) DO UPDATE
-			SET nome = EXCLUDED.nome,
-			    senha_hash = EXCLUDED.senha_hash,
-			    admin_plataforma = false
-		RETURNING id::text`, email, string(hash)).Scan(&usuarioID)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "erro ao salvar usuário de teste: %v\n", err)
-		os.Exit(1)
-	}
-
 	var orgID string
 	err = tx.QueryRow(ctx, `SELECT id::text FROM organizacoes WHERE nome = 'Laura Growth'`).Scan(&orgID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -117,12 +144,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO membros (organizacao_id, usuario_id, papel)
-		VALUES ($1, $2, 'membro')
-		ON CONFLICT DO NOTHING`, orgID, usuarioID); err != nil {
-		fmt.Fprintf(os.Stderr, "erro ao vincular membro: %v\n", err)
+	if err := upsertMembroE2E(ctx, tx, orgID, "Operação E2E", email, string(hash), []string{"ver_marca_posts"}); err != nil {
+		fmt.Fprintf(os.Stderr, "erro ao salvar usuário de teste: %v\n", err)
 		os.Exit(1)
+	}
+
+	if semAcessoEmail != "" {
+		semAcessoSenha := os.Getenv("LG_E2E_SEM_ACESSO_SENHA")
+		if len(semAcessoSenha) < 10 {
+			fmt.Fprintln(os.Stderr, "defina LG_E2E_SEM_ACESSO_SENHA com pelo menos 10 caracteres")
+			os.Exit(2)
+		}
+		hashSemAcesso, err := bcrypt.GenerateFromPassword([]byte(semAcessoSenha), 12)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao gerar hash: %v\n", err)
+			os.Exit(1)
+		}
+		if err := upsertMembroE2E(ctx, tx, orgID, "Sem Acesso E2E", semAcessoEmail, string(hashSemAcesso), nil); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao salvar usuário sem acesso: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	if _, err := tx.Exec(ctx, `
