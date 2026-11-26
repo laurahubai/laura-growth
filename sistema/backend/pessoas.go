@@ -56,18 +56,49 @@ type RespostaRegistroAcessos struct {
 	Registros []RegistroAcesso `json:"registros"`
 }
 
-func (a *API) rotasPessoas(m *http.ServeMux) {
-	m.HandleFunc("GET /api/pessoas", a.comSessao(a.listarPessoas))
-	m.HandleFunc("GET /api/pessoas/registro", a.comSessao(a.listarRegistroAcessos))
-	m.HandleFunc("PUT /api/pessoas/{usuarioId}/alcadas", a.comSessao(a.salvarAlcadasPessoa))
-	m.HandleFunc("DELETE /api/pessoas/{usuarioId}", a.comSessao(a.removerPessoa))
+type escopoGestaoPessoas struct {
+	orgID              string
+	viaAdminPlataforma bool
 }
 
-func (a *API) listarPessoas(w http.ResponseWriter, r *http.Request, s contextoSessao) {
+func detalheAcesso(escopo escopoGestaoPessoas, campos map[string]any) map[string]any {
+	out := make(map[string]any, len(campos)+1)
+	for k, v := range campos {
+		out[k] = v
+	}
+	if escopo.viaAdminPlataforma {
+		out["via_admin_plataforma"] = true
+	}
+	return out
+}
+
+func (a *API) resolverEscopoPessoasOrg(w http.ResponseWriter, r *http.Request, s contextoSessao) (escopoGestaoPessoas, bool) {
 	org, ok := a.autorizarAlcada(w, r, s, "gerenciar_pessoas")
 	if !ok {
-		return
+		return escopoGestaoPessoas{}, false
 	}
+	return escopoGestaoPessoas{orgID: org}, true
+}
+
+func (a *API) comEscopoPessoasOrg(h func(http.ResponseWriter, *http.Request, contextoSessao, escopoGestaoPessoas)) manipulador {
+	return func(w http.ResponseWriter, r *http.Request, s contextoSessao) {
+		escopo, ok := a.resolverEscopoPessoasOrg(w, r, s)
+		if !ok {
+			return
+		}
+		h(w, r, s, escopo)
+	}
+}
+
+func (a *API) rotasPessoas(m *http.ServeMux) {
+	m.HandleFunc("GET /api/pessoas", a.comSessao(a.comEscopoPessoasOrg(a.listarPessoasCom)))
+	m.HandleFunc("GET /api/pessoas/registro", a.comSessao(a.comEscopoPessoasOrg(a.listarRegistroAcessosCom)))
+	m.HandleFunc("PUT /api/pessoas/{usuarioId}/alcadas", a.comSessao(a.comEscopoPessoasOrg(a.salvarAlcadasPessoaCom)))
+	m.HandleFunc("DELETE /api/pessoas/{usuarioId}", a.comSessao(a.comEscopoPessoasOrg(a.removerPessoaCom)))
+}
+
+func (a *API) listarPessoasCom(w http.ResponseWriter, r *http.Request, _ contextoSessao, escopo escopoGestaoPessoas) {
+	org := escopo.orgID
 
 	linhasMembros, err := a.banco.Query(r.Context(), `
 		SELECT m.usuario_id::text, u.nome, u.email, m.papel, m.criado_em,
@@ -142,20 +173,48 @@ func (a *API) listarPessoas(w http.ResponseWriter, r *http.Request, s contextoSe
 	})
 }
 
-// iniciarEscritaPessoas abre transação serializada por organização e revalida a alçada
+// iniciarEscritaPessoas abre transação serializada por organização e revalida a permissão
 // dentro da própria transação (evita corrida entre revogação do ator e gravação).
-func (a *API) iniciarEscritaPessoas(w http.ResponseWriter, r *http.Request, s contextoSessao, org string) (pgx.Tx, bool) {
+func (a *API) iniciarEscritaPessoas(w http.ResponseWriter, r *http.Request, s contextoSessao, escopo escopoGestaoPessoas) (pgx.Tx, bool) {
 	tx, err := a.banco.Begin(r.Context())
 	if err != nil {
 		falhaInterna(w, err)
 		return nil, false
 	}
-	if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtext('laura-growth:pessoas:' || $1))`, org); err != nil {
+	if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtext('laura-growth:pessoas:' || $1))`, escopo.orgID); err != nil {
 		_ = tx.Rollback(r.Context())
 		falhaInterna(w, err)
 		return nil, false
 	}
-	permitido, err := exigirAlcadaCom(r.Context(), tx, org, s.usuario.ID, "gerenciar_pessoas", true)
+	if escopo.viaAdminPlataforma {
+		var ehAdmin bool
+		if err := tx.QueryRow(r.Context(), `SELECT admin_plataforma FROM usuarios WHERE id = $1::uuid FOR SHARE`, s.usuario.ID).Scan(&ehAdmin); err != nil {
+			_ = tx.Rollback(r.Context())
+			falhaInterna(w, err)
+			return nil, false
+		}
+		if !ehAdmin {
+			_ = tx.Rollback(r.Context())
+			slog.Warn("acesso administrativo recusado na transação",
+				"usuarioId", s.usuario.ID, "organizacaoId", escopo.orgID,
+				"metodo", r.Method, "rota", r.URL.Path)
+			erro(w, 403, "sem_permissao", "Acesso restrito ao administrador da plataforma.")
+			return nil, false
+		}
+		var existe bool
+		if err := tx.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM organizacoes WHERE id = $1::uuid)`, escopo.orgID).Scan(&existe); err != nil {
+			_ = tx.Rollback(r.Context())
+			falhaInterna(w, err)
+			return nil, false
+		}
+		if !existe {
+			_ = tx.Rollback(r.Context())
+			erro(w, 404, "nao_encontrado", "Organização não encontrada.")
+			return nil, false
+		}
+		return tx, true
+	}
+	permitido, err := exigirAlcadaCom(r.Context(), tx, escopo.orgID, s.usuario.ID, "gerenciar_pessoas", true)
 	if err != nil {
 		_ = tx.Rollback(r.Context())
 		falhaInterna(w, err)
@@ -164,7 +223,7 @@ func (a *API) iniciarEscritaPessoas(w http.ResponseWriter, r *http.Request, s co
 	if !permitido {
 		_ = tx.Rollback(r.Context())
 		slog.Warn("acesso recusado na transação por falta de alçada",
-			"usuarioId", s.usuario.ID, "organizacaoId", org, "alcada", "gerenciar_pessoas",
+			"usuarioId", s.usuario.ID, "organizacaoId", escopo.orgID, "alcada", "gerenciar_pessoas",
 			"metodo", r.Method, "rota", r.URL.Path)
 		erro(w, 403, "sem_permissao", "Você não tem permissão para realizar esta ação.")
 		return nil, false
@@ -172,11 +231,8 @@ func (a *API) iniciarEscritaPessoas(w http.ResponseWriter, r *http.Request, s co
 	return tx, true
 }
 
-func (a *API) salvarAlcadasPessoa(w http.ResponseWriter, r *http.Request, s contextoSessao) {
-	org, ok := a.autorizarAlcada(w, r, s, "gerenciar_pessoas")
-	if !ok {
-		return
-	}
+func (a *API) salvarAlcadasPessoaCom(w http.ResponseWriter, r *http.Request, s contextoSessao, escopo escopoGestaoPessoas) {
+	org := escopo.orgID
 	alvoID := r.PathValue("usuarioId")
 	if alvoID == s.usuario.ID {
 		erro(w, 403, "auto_edicao", "Você não pode alterar as próprias alçadas.")
@@ -203,7 +259,7 @@ func (a *API) salvarAlcadasPessoa(w http.ResponseWriter, r *http.Request, s cont
 		return
 	}
 
-	tx, ok := a.iniciarEscritaPessoas(w, r, s, org)
+	tx, ok := a.iniciarEscritaPessoas(w, r, s, escopo)
 	if !ok {
 		return
 	}
@@ -268,12 +324,12 @@ func (a *API) salvarAlcadasPessoa(w http.ResponseWriter, r *http.Request, s cont
 				falhaInterna(w, err)
 				return
 			}
-			if err := registrarAcesso(r.Context(), tx, &org, s.usuario.ID, &alvoID, &alvoEmail, "alcada_revogada", map[string]string{"alcada": al}); err != nil {
+			if err := registrarAcesso(r.Context(), tx, &org, s.usuario.ID, &alvoID, &alvoEmail, "alcada_revogada", detalheAcesso(escopo, map[string]any{"alcada": al})); err != nil {
 				falhaInterna(w, err)
 				return
 			}
 			if al == "gerenciar_pessoas" {
-				if err := revogarConvitesPendentesDoCriador(r.Context(), tx, org, s.usuario.ID, alvoID, "alcada_criador_revogada", a.agora()); err != nil {
+				if err := revogarConvitesPendentesDoCriador(r.Context(), tx, org, s.usuario.ID, alvoID, "alcada_criador_revogada", escopo.viaAdminPlataforma, a.agora()); err != nil {
 					falhaInterna(w, err)
 					return
 				}
@@ -287,7 +343,7 @@ func (a *API) salvarAlcadasPessoa(w http.ResponseWriter, r *http.Request, s cont
 				falhaInterna(w, err)
 				return
 			}
-			if err := registrarAcesso(r.Context(), tx, &org, s.usuario.ID, &alvoID, &alvoEmail, "alcada_concedida", map[string]string{"alcada": al}); err != nil {
+			if err := registrarAcesso(r.Context(), tx, &org, s.usuario.ID, &alvoID, &alvoEmail, "alcada_concedida", detalheAcesso(escopo, map[string]any{"alcada": al})); err != nil {
 				falhaInterna(w, err)
 				return
 			}
@@ -309,11 +365,8 @@ func (a *API) salvarAlcadasPessoa(w http.ResponseWriter, r *http.Request, s cont
 	})
 }
 
-func (a *API) removerPessoa(w http.ResponseWriter, r *http.Request, s contextoSessao) {
-	org, ok := a.autorizarAlcada(w, r, s, "gerenciar_pessoas")
-	if !ok {
-		return
-	}
+func (a *API) removerPessoaCom(w http.ResponseWriter, r *http.Request, s contextoSessao, escopo escopoGestaoPessoas) {
+	org := escopo.orgID
 	alvoID := r.PathValue("usuarioId")
 	if alvoID == s.usuario.ID {
 		erro(w, 403, "auto_remocao", "Você não pode remover a si mesmo da organização.")
@@ -324,7 +377,7 @@ func (a *API) removerPessoa(w http.ResponseWriter, r *http.Request, s contextoSe
 		return
 	}
 
-	tx, ok := a.iniciarEscritaPessoas(w, r, s, org)
+	tx, ok := a.iniciarEscritaPessoas(w, r, s, escopo)
 	if !ok {
 		return
 	}
@@ -381,13 +434,13 @@ func (a *API) removerPessoa(w http.ResponseWriter, r *http.Request, s contextoSe
 		falhaInterna(w, err)
 		return
 	}
-	if err := revogarConvitesPendentesDoCriador(r.Context(), tx, org, s.usuario.ID, alvoID, "criador_removido", a.agora()); err != nil {
+	if err := revogarConvitesPendentesDoCriador(r.Context(), tx, org, s.usuario.ID, alvoID, "criador_removido", escopo.viaAdminPlataforma, a.agora()); err != nil {
 		falhaInterna(w, err)
 		return
 	}
-	if err := registrarAcesso(r.Context(), tx, &org, s.usuario.ID, &alvoID, &alvoEmail, "membro_removido", map[string]any{
+	if err := registrarAcesso(r.Context(), tx, &org, s.usuario.ID, &alvoID, &alvoEmail, "membro_removido", detalheAcesso(escopo, map[string]any{
 		"alcadasAnteriores": ordenarAlcadas(alcadasAnteriores),
-	}); err != nil {
+	})); err != nil {
 		falhaInterna(w, err)
 		return
 	}
@@ -399,11 +452,8 @@ func (a *API) removerPessoa(w http.ResponseWriter, r *http.Request, s contextoSe
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (a *API) listarRegistroAcessos(w http.ResponseWriter, r *http.Request, s contextoSessao) {
-	org, ok := a.autorizarAlcada(w, r, s, "gerenciar_pessoas")
-	if !ok {
-		return
-	}
+func (a *API) listarRegistroAcessosCom(w http.ResponseWriter, r *http.Request, _ contextoSessao, escopo escopoGestaoPessoas) {
+	org := escopo.orgID
 	limite := 100
 	if bruto := r.URL.Query().Get("limite"); bruto != "" {
 		v, err := strconv.Atoi(bruto)

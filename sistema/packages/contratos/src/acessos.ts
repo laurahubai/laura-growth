@@ -8,6 +8,8 @@
 // - GET    /api/pessoas/registro?limite=100   -> RespostaRegistroAcessos (exige gerenciar_pessoas)
 // - GET    /api/admin/equipe                  -> RespostaEquipeAdmin (exige usuario.adminPlataforma = true)
 // - PUT    /api/admin/equipe/{usuarioId}      -> MembroEquipe (exige usuario.adminPlataforma = true; só membros da casa; último admin -> 409)
+// - GET    /api/admin/organizacoes            -> RespostaOrganizacoesAdmin (exige usuario.adminPlataforma = true)
+// - /api/admin/organizacoes/{orgId}/pessoas|convites|... -> espelha as rotas da organização para admin da plataforma (403 se não admin, 404 se org desconhecida)
 //
 // Conjuntos prontos (B7):
 // São retornados pelo servidor no campo `conjuntos` de GET /api/pessoas (e espelhados aqui
@@ -220,3 +222,21 @@ export const PedidoAceitarConvite = z.object({
   senha: z.string().min(1).optional(),
 });
 export type PedidoAceitarConvite = z.infer<typeof PedidoAceitarConvite>;
+
+// ---- Administração → Organizações (B11) ----
+
+export const OrganizacaoAdmin = z.object({
+  id: z.string(),
+  nome: z.string(),
+  tipo: z.enum(["empresa", "clinica_estetica"]),
+  daCasa: z.boolean(),
+  criadaEm: z.string(),
+  membros: z.number().int(),
+});
+export type OrganizacaoAdmin = z.infer<typeof OrganizacaoAdmin>;
+
+// GET /api/admin/organizacoes
+export const RespostaOrganizacoesAdmin = z.object({
+  organizacoes: z.array(OrganizacaoAdmin),
+});
+export type RespostaOrganizacoesAdmin = z.infer<typeof RespostaOrganizacoesAdmin>;

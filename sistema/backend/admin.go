@@ -116,6 +116,14 @@ func (a *API) rotasAdmin(m *http.ServeMux) {
 	adminMux.HandleFunc("GET /api/admin/avisos", com(a.listarAvisos))
 	adminMux.HandleFunc("GET /api/admin/equipe", com(a.listarEquipeAdmin))
 	adminMux.HandleFunc("PUT /api/admin/equipe/{usuarioId}", com(a.atualizarEquipeAdmin))
+	adminMux.HandleFunc("GET /api/admin/organizacoes", com(a.listarOrganizacoesAdmin))
+	adminMux.HandleFunc("GET /api/admin/organizacoes/{orgId}/pessoas", com(a.comEscopoPessoasAdmin(a.listarPessoasCom)))
+	adminMux.HandleFunc("GET /api/admin/organizacoes/{orgId}/pessoas/registro", com(a.comEscopoPessoasAdmin(a.listarRegistroAcessosCom)))
+	adminMux.HandleFunc("PUT /api/admin/organizacoes/{orgId}/pessoas/{usuarioId}/alcadas", com(a.comEscopoPessoasAdmin(a.salvarAlcadasPessoaCom)))
+	adminMux.HandleFunc("DELETE /api/admin/organizacoes/{orgId}/pessoas/{usuarioId}", com(a.comEscopoPessoasAdmin(a.removerPessoaCom)))
+	adminMux.HandleFunc("POST /api/admin/organizacoes/{orgId}/convites", com(a.comEscopoPessoasAdmin(a.criarConviteCom)))
+	adminMux.HandleFunc("POST /api/admin/organizacoes/{orgId}/convites/{id}/reenviar", com(a.comEscopoPessoasAdmin(a.reenviarConviteCom)))
+	adminMux.HandleFunc("DELETE /api/admin/organizacoes/{orgId}/convites/{id}", com(a.comEscopoPessoasAdmin(a.revogarConviteCom)))
 
 	// Qualquer rota ou método sob /api/admin/* exige admin_plataforma antes de 404/405 (AC30).
 	despacharAdmin := a.comAdmin(func(w http.ResponseWriter, r *http.Request, s contextoSessao) {

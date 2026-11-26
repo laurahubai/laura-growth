@@ -41,9 +41,9 @@ type ConvitePublico struct {
 }
 
 func (a *API) rotasConvites(m *http.ServeMux) {
-	m.HandleFunc("POST /api/convites", a.comSessao(a.criarConvite))
-	m.HandleFunc("POST /api/convites/{id}/reenviar", a.comSessao(a.reenviarConvite))
-	m.HandleFunc("DELETE /api/convites/{id}", a.comSessao(a.revogarConvite))
+	m.HandleFunc("POST /api/convites", a.comSessao(a.comEscopoPessoasOrg(a.criarConviteCom)))
+	m.HandleFunc("POST /api/convites/{id}/reenviar", a.comSessao(a.comEscopoPessoasOrg(a.reenviarConviteCom)))
+	m.HandleFunc("DELETE /api/convites/{id}", a.comSessao(a.comEscopoPessoasOrg(a.revogarConviteCom)))
 	m.HandleFunc("GET /api/convites/{token}", a.verConvitePublico)
 	m.HandleFunc("POST /api/convites/{token}/aceitar", a.aceitarConvite)
 }
@@ -223,7 +223,7 @@ func (a *API) atualizarEstadoEnvioConvite(conviteID string, tokenHash []byte, es
 	return estado
 }
 
-func revogarConvitesPendentesDoCriador(ctx context.Context, tx pgx.Tx, orgID, atorID, criadorID, motivo string, agora time.Time) error {
+func revogarConvitesPendentesDoCriador(ctx context.Context, tx pgx.Tx, orgID, atorID, criadorID, motivo string, viaAdminPlataforma bool, agora time.Time) error {
 	linhas, err := tx.Query(ctx, `
 		UPDATE convites
 		SET revogado_em = $3
@@ -249,22 +249,20 @@ func revogarConvitesPendentesDoCriador(ctx context.Context, tx pgx.Tx, orgID, at
 	if err != nil {
 		return err
 	}
+	escopo := escopoGestaoPessoas{orgID: orgID, viaAdminPlataforma: viaAdminPlataforma}
 	for _, item := range revogados {
-		if err := registrarAcessoEm(ctx, tx, &orgID, &atorID, nil, &item.email, "convite_revogado", map[string]any{
+		if err := registrarAcessoEm(ctx, tx, &orgID, &atorID, nil, &item.email, "convite_revogado", detalheAcesso(escopo, map[string]any{
 			"conviteId": item.id,
 			"motivo":    motivo,
-		}, agora); err != nil {
+		}), agora); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (a *API) criarConvite(w http.ResponseWriter, r *http.Request, s contextoSessao) {
-	org, ok := a.autorizarAlcada(w, r, s, "gerenciar_pessoas")
-	if !ok {
-		return
-	}
+func (a *API) criarConviteCom(w http.ResponseWriter, r *http.Request, s contextoSessao, escopo escopoGestaoPessoas) {
+	org := escopo.orgID
 
 	var pedido struct {
 		Email   string   `json:"email"`
@@ -285,7 +283,7 @@ func (a *API) criarConvite(w http.ResponseWriter, r *http.Request, s contextoSes
 	}
 
 	agora := a.agora()
-	tx, ok := a.iniciarEscritaPessoas(w, r, s, org)
+	tx, ok := a.iniciarEscritaPessoas(w, r, s, escopo)
 	if !ok {
 		return
 	}
@@ -353,10 +351,10 @@ func (a *API) criarConvite(w http.ResponseWriter, r *http.Request, s contextoSes
 		return
 	}
 	for _, idAntigo := range substituidos {
-		if err := registrarAcessoEm(r.Context(), tx, &org, &s.usuario.ID, nil, &email, "convite_revogado", map[string]any{
+		if err := registrarAcessoEm(r.Context(), tx, &org, &s.usuario.ID, nil, &email, "convite_revogado", detalheAcesso(escopo, map[string]any{
 			"conviteId": idAntigo,
 			"motivo":    "substituido",
-		}, agora); err != nil {
+		}), agora); err != nil {
 			falhaInterna(w, err)
 			return
 		}
@@ -380,10 +378,10 @@ func (a *API) criarConvite(w http.ResponseWriter, r *http.Request, s contextoSes
 		return
 	}
 
-	if err := registrarAcessoEm(r.Context(), tx, &org, &s.usuario.ID, nil, &email, "convite_criado", map[string]any{
+	if err := registrarAcessoEm(r.Context(), tx, &org, &s.usuario.ID, nil, &email, "convite_criado", detalheAcesso(escopo, map[string]any{
 		"conviteId": conviteID,
 		"alcadas":   alcadas,
-	}, agora); err != nil {
+	}), agora); err != nil {
 		falhaInterna(w, err)
 		return
 	}
@@ -413,11 +411,8 @@ func (a *API) criarConvite(w http.ResponseWriter, r *http.Request, s contextoSes
 	})
 }
 
-func (a *API) reenviarConvite(w http.ResponseWriter, r *http.Request, s contextoSessao) {
-	org, ok := a.autorizarAlcada(w, r, s, "gerenciar_pessoas")
-	if !ok {
-		return
-	}
+func (a *API) reenviarConviteCom(w http.ResponseWriter, r *http.Request, s contextoSessao, escopo escopoGestaoPessoas) {
+	org := escopo.orgID
 	conviteID := r.PathValue("id")
 	if !uuidValido(conviteID) {
 		erro(w, 404, "nao_encontrado", "Convite não encontrado.")
@@ -425,7 +420,7 @@ func (a *API) reenviarConvite(w http.ResponseWriter, r *http.Request, s contexto
 	}
 
 	agora := a.agora()
-	tx, ok := a.iniciarEscritaPessoas(w, r, s, org)
+	tx, ok := a.iniciarEscritaPessoas(w, r, s, escopo)
 	if !ok {
 		return
 	}
@@ -491,9 +486,9 @@ func (a *API) reenviarConvite(w http.ResponseWriter, r *http.Request, s contexto
 		return
 	}
 
-	if err := registrarAcessoEm(r.Context(), tx, &org, &s.usuario.ID, nil, &email, "convite_reenviado", map[string]any{
+	if err := registrarAcessoEm(r.Context(), tx, &org, &s.usuario.ID, nil, &email, "convite_reenviado", detalheAcesso(escopo, map[string]any{
 		"conviteId": conviteID,
-	}, agora); err != nil {
+	}), agora); err != nil {
 		falhaInterna(w, err)
 		return
 	}
@@ -522,11 +517,8 @@ func (a *API) reenviarConvite(w http.ResponseWriter, r *http.Request, s contexto
 	})
 }
 
-func (a *API) revogarConvite(w http.ResponseWriter, r *http.Request, s contextoSessao) {
-	org, ok := a.autorizarAlcada(w, r, s, "gerenciar_pessoas")
-	if !ok {
-		return
-	}
+func (a *API) revogarConviteCom(w http.ResponseWriter, r *http.Request, s contextoSessao, escopo escopoGestaoPessoas) {
+	org := escopo.orgID
 	conviteID := r.PathValue("id")
 	if !uuidValido(conviteID) {
 		erro(w, 404, "nao_encontrado", "Convite não encontrado.")
@@ -534,7 +526,7 @@ func (a *API) revogarConvite(w http.ResponseWriter, r *http.Request, s contextoS
 	}
 
 	agora := a.agora()
-	tx, ok := a.iniciarEscritaPessoas(w, r, s, org)
+	tx, ok := a.iniciarEscritaPessoas(w, r, s, escopo)
 	if !ok {
 		return
 	}
@@ -566,9 +558,9 @@ func (a *API) revogarConvite(w http.ResponseWriter, r *http.Request, s contextoS
 		return
 	}
 
-	if err := registrarAcessoEm(r.Context(), tx, &org, &s.usuario.ID, nil, &email, "convite_revogado", map[string]any{
+	if err := registrarAcessoEm(r.Context(), tx, &org, &s.usuario.ID, nil, &email, "convite_revogado", detalheAcesso(escopo, map[string]any{
 		"conviteId": conviteID,
-	}, agora); err != nil {
+	}), agora); err != nil {
 		falhaInterna(w, err)
 		return
 	}
@@ -594,13 +586,15 @@ func (a *API) verConvitePublico(w http.ResponseWriter, r *http.Request) {
 		       EXISTS (SELECT 1 FROM usuarios u WHERE lower(u.email) = lower(c.email))
 		FROM convites c
 		JOIN organizacoes o ON o.id = c.organizacao_id
-		JOIN membros cm ON cm.organizacao_id = c.organizacao_id AND cm.usuario_id = c.criado_por
+		LEFT JOIN usuarios cu ON cu.id = c.criado_por
+		LEFT JOIN membros cm ON cm.organizacao_id = c.organizacao_id AND cm.usuario_id = c.criado_por
 		WHERE c.token_hash = $1
 		  AND c.aceito_em IS NULL
 		  AND c.revogado_em IS NULL
 		  AND c.expira_em > $2
 		  AND (
-		    cm.papel = 'dono'
+		    COALESCE(cu.admin_plataforma, false) = true
+		    OR cm.papel = 'dono'
 		    OR EXISTS (
 		      SELECT 1 FROM alcadas_membro cam
 		      WHERE cam.organizacao_id = cm.organizacao_id
@@ -679,13 +673,23 @@ func (a *API) aceitarConvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// S-1: o convite só pode ser aceito enquanto quem o criou continuar dono ou membro com gerenciar_pessoas.
+	// S-1: o convite só pode ser aceito enquanto quem o criou continuar administrador da plataforma,
+	// dono ou membro com gerenciar_pessoas.
 	criadorAutorizado := false
 	if criadoPor != nil {
-		criadorAutorizado, err = exigirAlcadaCom(r.Context(), tx, orgID, *criadoPor, "gerenciar_pessoas", false)
-		if err != nil {
+		var ehAdminCriador bool
+		if err := tx.QueryRow(r.Context(), `SELECT admin_plataforma FROM usuarios WHERE id = $1::uuid`, *criadoPor).Scan(&ehAdminCriador); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			falhaInterna(w, err)
 			return
+		}
+		if ehAdminCriador {
+			criadorAutorizado = true
+		} else {
+			criadorAutorizado, err = exigirAlcadaCom(r.Context(), tx, orgID, *criadoPor, "gerenciar_pessoas", false)
+			if err != nil {
+				falhaInterna(w, err)
+				return
+			}
 		}
 	}
 	if !criadorAutorizado {
