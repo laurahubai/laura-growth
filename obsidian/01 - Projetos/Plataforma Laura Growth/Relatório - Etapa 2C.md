@@ -35,7 +35,7 @@ Resumo da construção da etapa 2C do [[Roteiro de Construção - Fase 1A]], con
 - **Pontos menores das revisões, sem risco:** o selo diz sempre "Confirmado por você", mesmo quando quem confirmou foi outra pessoa (é o texto da especificação). A troca de página na lista de versões mostra "Carregando…" na tela inteira.
 
 ## Perguntas para você (Paulo)
-1. **A IA pode trocar o que você já confirmou?** Hoje, por segurança, não: a sugestão da IA ignora campos confirmados. Na 2D, quer que a IA possa propor uma mudança num campo confirmado (por exemplo, como sugestão pendente de aprovação)?
+1. **A IA pode trocar o que você já confirmou?** Respondido em 26/11/2026: **sim, como sugestão pendente**. Na 2D, a IA pode propor mudança num campo confirmado, mas o valor confirmado só muda depois que você aceitar.
 
 ## Relacionado
 [[Especificação - Etapa 2C]] · [[Roteiro de Construção - Fase 1A]] · [[Relatório - Etapa 2B]] · [[prd-lauragrowth20]] · [[Índice - Projetos]]

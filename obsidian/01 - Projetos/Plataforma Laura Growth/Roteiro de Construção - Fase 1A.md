@@ -142,6 +142,7 @@ Pronto quando:
 *Verificado em 26/11/2026 por testes automáticos (ver [[Especificação - Etapa 2C]] e [[Relatório - Etapa 2C]]). A sugestão da IA já tem o registro pronto, mas só passa a acontecer de fato com o Chat do CMO (2D).*
 
 ## Etapa 2D — Chat do CMO
+Decidido em 26/11/2026: a IA pode propor mudança num campo do kit já confirmado, como **sugestão pendente**; o valor confirmado só muda quando você aceitar.
 **Constrói:** o onboarding como conversa entre o CMO de IA e a pessoa, construindo as respostas juntos. Substitui o onboarding de 4 passos do protótipo, que vira a barra de progresso ao lado.
 **Requisitos:** MKT-05; PRD 2.0 RF-01, §7 e §8.
 
