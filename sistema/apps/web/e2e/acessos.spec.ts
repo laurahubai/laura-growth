@@ -590,3 +590,96 @@ test("S-2: parâmetro ?proximo= no login aceita apenas /convite/[token] e ignora
     rodarApoio(["limpar"], apoioEnv);
   }
 });
+
+test("B11: Administração → Organizações permite admin não-membro gerenciar pessoas e bloqueia não-admin", async ({
+  browser,
+}) => {
+  const tag = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const orgNome = `Org B11 Admin ${tag}`;
+  const orgDonoEmail = `dono-b11-${tag}@exemplo.test`;
+  const orgDonoSenha = senhaAleatoria();
+  const membroEmail = `membro-b11-${tag}@exemplo.test`;
+  const membroSenha = senhaAleatoria();
+  const convidadoEmail = `convidado-e2e-b11-${tag}@exemplo.test`;
+
+  const apoioEnv = {
+    LG_E2E_ORG_NOME: orgNome,
+    LG_E2E_ORG_DONO_EMAIL: orgDonoEmail,
+    LG_E2E_ORG_DONO_SENHA: orgDonoSenha,
+    LG_E2E_OPERACAO_EMAIL: membroEmail,
+    LG_E2E_OPERACAO_SENHA: membroSenha,
+  };
+  rodarApoio(["preparar"], apoioEnv);
+
+  try {
+    // 1. Não-admin não vê Administração e é bloqueado ao acessar /admin/organizacoes por URL direta.
+    const ctxComum = await browser.newContext();
+    const pageComum = await ctxComum.newPage();
+    await entrar(pageComum, membroEmail, membroSenha);
+
+    await expect(
+      pageComum.getByRole("navigation", { name: "Menu principal" }).getByRole("link", { name: "Administração" }),
+    ).toHaveCount(0);
+
+    await pageComum.goto("/admin/organizacoes");
+    await expect(pageComum).toHaveURL(/\/inicio$/);
+    await expect(pageComum.getByTestId("lista-organizacoes")).toHaveCount(0);
+
+    await pageComum.goto("/admin/organizacoes/00000000-0000-4000-8000-000000000000");
+    await expect(pageComum).toHaveURL(/\/inicio$/);
+    await ctxComum.close();
+
+    // 2. Admin da plataforma (não membro da org temporária) abre Organizações -> org -> edita alçada e convida.
+    const ctxAdmin = await browser.newContext();
+    const pageAdmin = await ctxAdmin.newPage();
+    await entrar(pageAdmin, donoEmail, donoSenha);
+
+    await pageAdmin.getByRole("navigation", { name: "Menu principal" }).getByRole("link", { name: "Administração" }).click();
+    const menuAdmin = pageAdmin.getByRole("navigation", { name: "Menu da Administração" });
+    await expect(menuAdmin.getByRole("link", { name: "Organizações" })).toBeVisible();
+    await menuAdmin.getByRole("link", { name: "Organizações" }).click();
+    await expect(pageAdmin).toHaveURL(/\/admin\/organizacoes$/);
+
+    const listaOrgs = pageAdmin.getByTestId("lista-organizacoes");
+    await expect(listaOrgs).toContainText(orgNome);
+    await listaOrgs.getByRole("link", { name: orgNome }).click();
+    await expect(pageAdmin).toHaveURL(/\/admin\/organizacoes\/[0-9a-f-]+$/);
+    await expect(pageAdmin.getByRole("heading", { name: "Pessoas", exact: true })).toBeVisible();
+    await expect(pageAdmin.getByText(orgNome)).toBeVisible();
+
+    // Dono continua protegido.
+    const linhaDono = pageAdmin.getByTestId(`membro-${orgDonoEmail}`);
+    await expect(linhaDono).toContainText("Dono não editável");
+
+    // Admin edita alçadas de um membro da org.
+    const linhaMembro = pageAdmin.getByTestId(`membro-${membroEmail}`);
+    await linhaMembro.getByRole("button", { name: "Editar alçadas" }).click();
+    const dialog = pageAdmin.getByRole("dialog", { name: "Editar alçadas" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel("Conversar com o CMO e editar o DNA da marca").check();
+    await dialog.getByRole("button", { name: "Salvar alçadas" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(linhaMembro).toContainText("Conversar com o CMO e editar o DNA da marca");
+
+    // Admin convida nova pessoa para a org.
+    const formConvite = pageAdmin.getByTestId("form-convite");
+    await formConvite.getByLabel("E-mail").fill(convidadoEmail);
+    await formConvite.getByLabel("Ver a marca e os posts").check();
+    await formConvite.getByRole("button", { name: "Enviar convite" }).click();
+    await expect(pageAdmin.getByTestId("convite-link-gerado")).toBeVisible();
+    await expect(pageAdmin.getByTestId(`convite-${convidadoEmail}`)).toBeVisible();
+
+    // Histórico registra admin da plataforma como ator com marcador via administração da plataforma.
+    const historico = pageAdmin.getByTestId("historico-acessos");
+    await expect(historico).toContainText("Alçada concedida");
+    await expect(historico).toContainText("Convite criado");
+    await expect(historico).toContainText("via administração da plataforma");
+    await expect(historico).toContainText(new RegExp(donoEmail.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+
+    await pageAdmin.getByRole("link", { name: "Voltar para organizações" }).click();
+    await expect(pageAdmin).toHaveURL(/\/admin\/organizacoes$/);
+    await ctxAdmin.close();
+  } finally {
+    rodarApoio(["limpar"], apoioEnv);
+  }
+});

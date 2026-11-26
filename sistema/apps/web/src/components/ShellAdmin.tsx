@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { AlertTriangle, ArrowLeft, LogOut, ScrollText, Server, ShieldCheck, Users, Workflow } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Building2, LogOut, ScrollText, Server, ShieldCheck, Users, Workflow } from "lucide-react";
 import { erroSemPermissao, FalhaApi, useAvisosAdmin, useSair, useSessao } from "@/lib/api";
 import { formatarUsd } from "@/lib/formato";
 
@@ -13,6 +13,7 @@ const MENU_ADMIN = [
 ];
 
 const MENU_PLATAFORMA = [
+  { href: "/admin/organizacoes", nome: "Organizações", icone: Building2 },
   { href: "/admin/equipe", nome: "Equipe", icone: Users },
 ];
 

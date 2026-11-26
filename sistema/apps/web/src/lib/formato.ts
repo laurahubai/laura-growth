@@ -104,23 +104,23 @@ function nomeAlcadaSeguro(codigo: unknown): string {
 
 export function descreverDetalheAcesso(reg: RegistroAcesso): string {
   const d = reg.detalhe ?? {};
+  let base = "—";
   if (typeof d.alcada === "string") {
-    return nomeAlcadaSeguro(d.alcada);
-  }
-  if (Array.isArray(d.alcadas) && d.alcadas.length > 0) {
-    return d.alcadas.map(nomeAlcadaSeguro).filter(Boolean).join(", ");
-  }
-  if (Array.isArray(d.alcadasAnteriores) && d.alcadasAnteriores.length > 0) {
-    return `Alçadas anteriores: ${d.alcadasAnteriores.map(nomeAlcadaSeguro).filter(Boolean).join(", ")}`;
-  }
-  if (typeof d.adminPlataforma === "boolean") {
-    return d.adminPlataforma ? "Tornou-se administrador da plataforma" : "Deixou de ser administrador da plataforma";
-  }
-  if (typeof d.envioEstado === "string") {
+    base = nomeAlcadaSeguro(d.alcada);
+  } else if (Array.isArray(d.alcadas) && d.alcadas.length > 0) {
+    base = d.alcadas.map(nomeAlcadaSeguro).filter(Boolean).join(", ");
+  } else if (Array.isArray(d.alcadasAnteriores) && d.alcadasAnteriores.length > 0) {
+    base = `Alçadas anteriores: ${d.alcadasAnteriores.map(nomeAlcadaSeguro).filter(Boolean).join(", ")}`;
+  } else if (typeof d.adminPlataforma === "boolean") {
+    base = d.adminPlataforma ? "Tornou-se administrador da plataforma" : "Deixou de ser administrador da plataforma";
+  } else if (typeof d.envioEstado === "string") {
     const e = d.envioEstado as EstadoEnvioConvite;
     if (e === "enviado" || e === "falhou" || e === "pendente") {
-      return `Envio: ${etiquetaEnvioConvite(e).texto.toLowerCase()}`;
+      base = `Envio: ${etiquetaEnvioConvite(e).texto.toLowerCase()}`;
     }
   }
-  return "—";
+  if (d.via_admin_plataforma === true) {
+    return base === "—" ? "Via administração da plataforma" : `${base} · via administração da plataforma`;
+  }
+  return base;
 }

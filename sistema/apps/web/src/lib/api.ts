@@ -23,6 +23,7 @@ import {
   RespostaKit,
   RespostaLerModelos,
   RespostaModelos,
+  RespostaOrganizacoesAdmin,
   RespostaPessoas,
   RespostaPrecos,
   RespostaRegistroAcessos,
@@ -347,82 +348,100 @@ export function useExecucoesAdmin(limite = 100) {
 
 // ---- Acessos, Pessoas e Convites (etapa 2B) ----
 
-export function usePessoas(orgId: string) {
+function chaveEscopoPessoas(orgId: string, baseApi: string) {
+  return baseApi === "/api" ? (["org", orgId] as const) : (["admin", "organizacoes", orgId] as const);
+}
+
+function invalidarEscopoPessoas(qc: ReturnType<typeof useQueryClient>, orgId: string, baseApi: string) {
+  qc.invalidateQueries({ queryKey: [...chaveEscopoPessoas(orgId, baseApi), "pessoas"] });
+  qc.invalidateQueries({ queryKey: [...chaveEscopoPessoas(orgId, baseApi), "registro-acessos"] });
+  if (baseApi !== "/api") {
+    qc.invalidateQueries({ queryKey: ["org", orgId, "pessoas"] });
+    qc.invalidateQueries({ queryKey: ["org", orgId, "registro-acessos"] });
+    qc.invalidateQueries({ queryKey: CHAVE_SESSAO });
+  }
+}
+
+export function usePessoas(orgId: string, baseApi = "/api") {
   return useQuery({
-    queryKey: ["org", orgId, "pessoas"],
-    queryFn: () => chamar("GET", "/api/pessoas", RespostaPessoas),
+    queryKey: [...chaveEscopoPessoas(orgId, baseApi), "pessoas"],
+    queryFn: () => chamar("GET", `${baseApi}/pessoas`, RespostaPessoas),
     enabled: Boolean(orgId),
     retry: tentarSemBloqueio,
   });
 }
 
-export function useRegistroAcessos(orgId: string, limite = 100) {
+export function useRegistroAcessos(orgId: string, limite = 100, baseApi = "/api") {
   return useQuery({
-    queryKey: ["org", orgId, "registro-acessos", limite],
-    queryFn: () => chamar("GET", `/api/pessoas/registro?limite=${limite}`, RespostaRegistroAcessos),
+    queryKey: [...chaveEscopoPessoas(orgId, baseApi), "registro-acessos", limite],
+    queryFn: () => chamar("GET", `${baseApi}/pessoas/registro?limite=${limite}`, RespostaRegistroAcessos),
     enabled: Boolean(orgId),
     retry: tentarSemBloqueio,
   });
 }
 
-export function useSalvarAlcadasPessoa(orgId: string) {
+export function useSalvarAlcadasPessoa(orgId: string, baseApi = "/api") {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ usuarioId, alcadas }: { usuarioId: string } & PedidoSalvarAlcadas) =>
-      chamar("PUT", `/api/pessoas/${encodeURIComponent(usuarioId)}/alcadas`, PessoaMembro, { alcadas }),
+      chamar("PUT", `${baseApi}/pessoas/${encodeURIComponent(usuarioId)}/alcadas`, PessoaMembro, { alcadas }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["org", orgId, "pessoas"] });
-      qc.invalidateQueries({ queryKey: ["org", orgId, "registro-acessos"] });
+      invalidarEscopoPessoas(qc, orgId, baseApi);
     },
   });
 }
 
-export function useRemoverPessoa(orgId: string) {
+export function useRemoverPessoa(orgId: string, baseApi = "/api") {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (usuarioId: string) =>
-      chamar("DELETE", `/api/pessoas/${encodeURIComponent(usuarioId)}`, null),
+      chamar("DELETE", `${baseApi}/pessoas/${encodeURIComponent(usuarioId)}`, null),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["org", orgId, "pessoas"] });
-      qc.invalidateQueries({ queryKey: ["org", orgId, "registro-acessos"] });
+      invalidarEscopoPessoas(qc, orgId, baseApi);
       qc.invalidateQueries({ queryKey: ["org", orgId, "detalhe"] });
+      qc.invalidateQueries({ queryKey: ["admin", "organizacoes"] });
     },
   });
 }
 
-export function useCriarConvite(orgId: string) {
+export function useCriarConvite(orgId: string, baseApi = "/api") {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (dados: PedidoCriarConvite) =>
-      chamar("POST", "/api/convites", RespostaConviteCriado, dados),
+      chamar("POST", `${baseApi}/convites`, RespostaConviteCriado, dados),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["org", orgId, "pessoas"] });
-      qc.invalidateQueries({ queryKey: ["org", orgId, "registro-acessos"] });
+      invalidarEscopoPessoas(qc, orgId, baseApi);
     },
   });
 }
 
-export function useReenviarConvite(orgId: string) {
+export function useReenviarConvite(orgId: string, baseApi = "/api") {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      chamar("POST", `/api/convites/${encodeURIComponent(id)}/reenviar`, RespostaConviteCriado),
+      chamar("POST", `${baseApi}/convites/${encodeURIComponent(id)}/reenviar`, RespostaConviteCriado),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["org", orgId, "pessoas"] });
-      qc.invalidateQueries({ queryKey: ["org", orgId, "registro-acessos"] });
+      invalidarEscopoPessoas(qc, orgId, baseApi);
     },
   });
 }
 
-export function useCancelarConvite(orgId: string) {
+export function useCancelarConvite(orgId: string, baseApi = "/api") {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      chamar("DELETE", `/api/convites/${encodeURIComponent(id)}`, null),
+      chamar("DELETE", `${baseApi}/convites/${encodeURIComponent(id)}`, null),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["org", orgId, "pessoas"] });
-      qc.invalidateQueries({ queryKey: ["org", orgId, "registro-acessos"] });
+      invalidarEscopoPessoas(qc, orgId, baseApi);
     },
+  });
+}
+
+export function useOrganizacoesAdmin() {
+  return useQuery({
+    queryKey: ["admin", "organizacoes"],
+    queryFn: () => chamar("GET", "/api/admin/organizacoes", RespostaOrganizacoesAdmin),
+    retry: tentarAdmin,
   });
 }
 
