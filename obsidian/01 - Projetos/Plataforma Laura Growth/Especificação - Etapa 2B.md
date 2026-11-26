@@ -99,3 +99,11 @@ Configurable approval rules (APV-01 to APV-05), org-defined custom sets, owner t
 
 ## Relacionado
 [[Roteiro de Construção - Fase 1A]] · [[PRD - Permissões e Aprovações]] · [[prd-lauragrowth20]] · [[Especificação - Etapa 2A-1]]
+
+## Adjustment of 26/11/2026 (Paulo's answers to the open questions) — approved 26/11/2026
+1. **Who grants access:** only administrators, either the platform admin or the client's organization admin. The organization admin is the owner plus anyone holding `gerenciar_pessoas`, which is itself granted on the assignment screen. An organization admin may grant any alçada (current behavior kept). **New:** a platform admin can manage people and invites of **any** organization from Administração → **Organizações** (list of organizations → that organization's Pessoas page, reusing the same component). Same rules apply: the owner cannot be edited or removed, and the admin cannot edit their own alçadas. Audit entries carry the platform admin as the actor, flagged `via_admin_plataforma`. Routes: `GET /api/admin/organizacoes`, and `/api/admin/organizacoes/{orgId}/pessoas|convites|...` mirroring the org routes, platform admin only (403 otherwise, 404 for an unknown org).
+2. **Invite self-accept risk:** accepted until email verification exists.
+
+| AC | What the test proves |
+|---|---|
+| B11 | A platform admin who is not a member lists organizations, invites into one, and toggles alçadas; a non-admin gets 403 on every `/api/admin/organizacoes*` route; the owner and self rules still hold; audit shows the platform admin as actor |
