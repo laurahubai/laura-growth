@@ -265,12 +265,14 @@ func TestConectoresGeracaoTextoEImagem(t *testing.T) {
 			prompt, _ := reqBody["prompt"].(string)
 			modeloReq, _ := reqBody["model"].(string)
 			_, temResponseFormat := reqBody["response_format"]
-			if strings.HasPrefix(modeloReq, "gpt-image-") && temResponseFormat {
+			if strings.HasPrefix(strings.ToLower(modeloReq), "dall-e-") {
+				if reqBody["response_format"] != "b64_json" {
+					w.WriteHeader(400)
+					return
+				}
+			} else if temResponseFormat {
 				w.WriteHeader(400)
-				return
-			}
-			if !strings.HasPrefix(modeloReq, "gpt-image-") && reqBody["response_format"] != "b64_json" {
-				w.WriteHeader(400)
+				_, _ = w.Write([]byte(`{"error":{"message":"Unknown parameter: 'response_format'."}}`))
 				return
 			}
 			switch prompt {
@@ -322,7 +324,11 @@ func TestConectoresGeracaoTextoEImagem(t *testing.T) {
 	if err != nil || rtOAI.Texto != "Sou gpt-4o" || rtOAI.TokensEntrada != 10 || rtOAI.TokensSaida != 25 {
 		t.Fatalf("OpenAI gerarTexto inesperado: %+v err=%v", rtOAI, err)
 	}
-	// gpt-image-* não envia response_format; dall-e-3 envia b64_json.
+	// Apenas dall-e-* envia response_format: b64_json; chatgpt-image-latest e gpt-image-1 não enviam response_format (J1).
+	riChatGPT, err := conOAI.gerarImagem(ctx, "chatgpt-image-latest", "círculo")
+	if err != nil || riChatGPT.ImagemDataUrl != "data:image/png;base64,"+imgBase64 || riChatGPT.Imagens != 1 || riChatGPT.TokensEntrada != 5 {
+		t.Fatalf("OpenAI chatgpt-image-latest gerarImagem inesperado: %+v err=%v", riChatGPT, err)
+	}
 	riOAI, err := conOAI.gerarImagem(ctx, "gpt-image-1", "círculo")
 	if err != nil || riOAI.ImagemDataUrl != "data:image/png;base64,"+imgBase64 || riOAI.Imagens != 1 || riOAI.TokensEntrada != 5 {
 		t.Fatalf("OpenAI gpt-image-1 gerarImagem inesperado: %+v err=%v", riOAI, err)
