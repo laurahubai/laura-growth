@@ -181,7 +181,7 @@ export type PedidoAtualizarEquipeAdmin = z.infer<typeof PedidoAtualizarEquipeAdm
 // ---------------------------------------------------------------------------
 
 // POST /api/convites (gerenciar_pessoas)
-// Erros: 400 dados_invalidos; 403 sem_alcada; 409 ja_membro; 429 limite_convites_pendentes | limite_envios_hora.
+// Erros: 400 dados_invalidos; 403 sem_permissao; 409 ja_membro; 429 limite_convites_pendentes | limite_envios_hora.
 export const PedidoCriarConvite = z.object({
   email: z.string().email(),
   alcadas: z.array(Alcada),
