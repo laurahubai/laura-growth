@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { AlertTriangle, ArrowLeft, LogOut, ScrollText, Server, ShieldCheck, Workflow } from "lucide-react";
+import { AlertTriangle, ArrowLeft, LogOut, ScrollText, Server, ShieldCheck, Users, Workflow } from "lucide-react";
 import { erroSemPermissao, FalhaApi, useAvisosAdmin, useSair, useSessao } from "@/lib/api";
 import { formatarUsd } from "@/lib/formato";
 
@@ -10,6 +10,10 @@ const MENU_ADMIN = [
   { href: "/admin/fornecedores", nome: "Fornecedores", icone: Server },
   { href: "/admin/atividades", nome: "Atividades", icone: Workflow },
   { href: "/admin/registros", nome: "Registros", icone: ScrollText },
+];
+
+const MENU_PLATAFORMA = [
+  { href: "/admin/equipe", nome: "Equipe", icone: Users },
 ];
 
 export function useRedirecionarSemPermissao(erro: unknown): string | null {
@@ -62,6 +66,12 @@ export function ShellAdmin({ children }: { children: React.ReactNode }) {
         </div>
         <div className="nav-grupo">IA e Custos</div>
         {MENU_ADMIN.map(({ href, nome, icone: I }) => (
+          <Link key={href} href={href} className={`nav-item ${rota.startsWith(href) ? "ativo" : ""}`}>
+            <I size={18} aria-hidden /> {nome}
+          </Link>
+        ))}
+        <div className="nav-grupo">Acessos</div>
+        {MENU_PLATAFORMA.map(({ href, nome, icone: I }) => (
           <Link key={href} href={href} className={`nav-item ${rota.startsWith(href) ? "ativo" : ""}`}>
             <I size={18} aria-hidden /> {nome}
           </Link>

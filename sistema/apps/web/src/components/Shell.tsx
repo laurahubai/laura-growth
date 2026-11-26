@@ -2,13 +2,27 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { Home, LogOut, Palette, ShieldCheck } from "lucide-react";
+import { Home, LogOut, Palette, ShieldCheck, Users } from "lucide-react";
+import type { Alcada } from "@laura-growth/contratos";
 import { FalhaApi, useSair, useSessao, useTrocarOrganizacao } from "@/lib/api";
 
-// Itens entram no menu conforme as etapas do roteiro ficam prontas.
-const MENU = [
+type ItemMenu = {
+  href: string;
+  nome: string;
+  icone: typeof Home;
+  alcada?: Alcada;
+};
+
+// Itens entram no menu conforme as etapas do roteiro ficam prontas e conforme as alçadas do membro.
+const MENU: { grupo: string; itens: ItemMenu[] }[] = [
   { grupo: "Trabalho", itens: [{ href: "/inicio", nome: "Início", icone: Home }] },
-  { grupo: "Organização", itens: [{ href: "/kit", nome: "Kit de marca", icone: Palette }] },
+  {
+    grupo: "Organização",
+    itens: [
+      { href: "/kit", nome: "Kit de marca", icone: Palette, alcada: "ver_marca_posts" },
+      { href: "/pessoas", nome: "Pessoas", icone: Users, alcada: "gerenciar_pessoas" },
+    ],
+  },
 ];
 
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -33,16 +47,20 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <div className="logo">
           <span className="logo-mark" aria-hidden>L</span> Laura Growth
         </div>
-        {MENU.map((g) => (
-          <div key={g.grupo} style={{ display: "contents" }}>
-            <div className="nav-grupo">{g.grupo}</div>
-            {g.itens.map(({ href, nome, icone: I }) => (
-              <Link key={href} href={href} className={`nav-item ${rota.startsWith(href) ? "ativo" : ""}`}>
-                <I size={18} aria-hidden /> {nome}
-              </Link>
-            ))}
-          </div>
-        ))}
+        {MENU.map((g) => {
+          const itensVisiveis = g.itens.filter((item) => !item.alcada || s.alcadas.includes(item.alcada));
+          if (itensVisiveis.length === 0) return null;
+          return (
+            <div key={g.grupo} style={{ display: "contents" }}>
+              <div className="nav-grupo">{g.grupo}</div>
+              {itensVisiveis.map(({ href, nome, icone: I }) => (
+                <Link key={href} href={href} className={`nav-item ${rota.startsWith(href) ? "ativo" : ""}`}>
+                  <I size={18} aria-hidden /> {nome}
+                </Link>
+              ))}
+            </div>
+          );
+        })}
         {s.usuario.adminPlataforma && (
           <div style={{ display: "contents" }}>
             <div className="nav-grupo">Plataforma</div>
