@@ -28,9 +28,17 @@ Resumo da construção da etapa 2B do [[Roteiro de Construção - Fase 1A]], con
 - **Implantação no stage:** não foi feita. É preciso fazer cópia do banco, aplicar a migração 0004 e trocar o programa do servidor. Isso fica para quando você quiser testar, porque o stage usa o mesmo banco da sua máquina.
 - **Fora do escopo da etapa (como na especificação):** regras de aprovação configuráveis, conjuntos criados pela organização, troca de dono, exclusão de organização e recuperação de senha.
 
-## Perguntas para você (Paulo)
-1. **Quem dá acessos pode dar o que não tem?** Hoje, quem tem "Convidar pessoas e dar acessos" pode conceder qualquer alçada, mesmo uma que não tenha, e pode retirar acessos ou remover outras pessoas (exceto o dono e a si mesmo). Manter assim?
-2. **Risco aceito no convite?** Quem convida recebe o link. Se o e-mail convidado ainda não tem conta, quem convidou poderia abrir o link e criar a conta no lugar da pessoa. Resolver isso exige confirmar o e-mail, o que não está na etapa. Aceita o risco por agora?
+## Perguntas para você (Paulo) — respondidas em 26/11/2026
+1. **Quem dá acessos pode dar o que não tem?** Resposta: sim. Só administradores dão acessos: o administrador da plataforma ou o administrador da organização (o dono e quem tem "Convidar pessoas e dar acessos"). O administrador da organização pode conceder qualquer alçada. Comportamento mantido.
+2. **Risco aceito no convite?** Resposta: sim, risco aceito até existir a confirmação de e-mail.
+
+## Ajuste de 26/11/2026 (critério B11)
+- **O que mudou:** o administrador da plataforma passa a cuidar das pessoas de **qualquer** organização, mesmo sem ser membro dela. Em Administração → **Organizações** ele vê a lista de organizações; ao abrir uma, usa a mesma tela Pessoas (convidar, marcar alçadas, remover, cancelar e reenviar convites, ver o histórico).
+- **Regras que continuam valendo:** o dono não pode ser alterado nem removido; ninguém altera as próprias alçadas; os limites de convites valem por organização. Quem não é administrador da plataforma é recusado pelo servidor em todas essas rotas.
+- **Histórico:** cada ação aparece com o administrador da plataforma como autor, marcada "via administração da plataforma".
+- **Convite feito pelo administrador da plataforma:** se ele deixar de ser administrador antes do aceite, o link deixa de valer.
+- **Testes (26/11/2026, branch `etapa-2b-acessos` integrada):** `go vet` sem avisos, formatação ok, `go test` aprovado com cobertura de 72,7%; verificação de tipos e montagem aprovadas; Playwright **9 de 9 aprovados** (inclui o novo teste da tela Organizações). Revisões geral e de segurança: nenhum problema bloqueante; o ponto importante (teste do convite após perder o acesso de administrador) foi corrigido.
+- **Ficou de fora (pontos menores, sem risco):** ao retirar o acesso de administrador de alguém, os convites que essa pessoa criou continuam aparecendo como pendentes, mas o link é recusado no aceite.
 
 ## Relacionado
 [[Especificação - Etapa 2B]] · [[Roteiro de Construção - Fase 1A]] · [[PRD - Permissões e Aprovações]] · [[Índice - Projetos]]
