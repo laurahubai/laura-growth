@@ -102,6 +102,7 @@ func (a *API) rotasAdmin(m *http.ServeMux) {
 	adminMux.HandleFunc("GET /api/admin/fornecedores", com(a.listarFornecedores))
 	adminMux.HandleFunc("POST /api/admin/fornecedores", com(a.criarFornecedor))
 	adminMux.HandleFunc("PATCH /api/admin/fornecedores/{id}", com(a.editarFornecedor))
+	adminMux.HandleFunc("DELETE /api/admin/fornecedores/{id}", com(a.excluirFornecedor))
 	adminMux.HandleFunc("POST /api/admin/fornecedores/{id}/ler-modelos", com(a.lerModelosFornecedor))
 	adminMux.HandleFunc("GET /api/admin/fornecedores/{id}/modelos", com(a.listarModelos))
 	adminMux.HandleFunc("POST /api/admin/fornecedores/{id}/modelos", com(a.criarModelo))
@@ -364,6 +365,93 @@ func (a *API) editarFornecedor(w http.ResponseWriter, r *http.Request, _ context
 		return
 	}
 	responder(w, 200, f)
+}
+
+func (a *API) excluirFornecedor(w http.ResponseWriter, r *http.Request, s contextoSessao) {
+	id := r.PathValue("id")
+	if !uuidValido(id) {
+		erro(w, 404, "nao_encontrado", "Fornecedor não encontrado.")
+		return
+	}
+
+	tx, err := a.banco.Begin(r.Context())
+	if err != nil {
+		falhaInterna(w, err)
+		return
+	}
+	defer tx.Rollback(r.Context()) //nolint:errcheck
+
+	if err := travarFornecedorTx(r.Context(), tx, id); err != nil {
+		falhaInterna(w, err)
+		return
+	}
+
+	var nome string
+	err = tx.QueryRow(r.Context(), `SELECT nome FROM ia_fornecedores WHERE id = $1::uuid FOR UPDATE`, id).Scan(&nome)
+	if errors.Is(err, pgx.ErrNoRows) {
+		erro(w, 404, "nao_encontrado", "Fornecedor não encontrado.")
+		return
+	}
+	if err != nil {
+		falhaInterna(w, err)
+		return
+	}
+
+	linhas, err := tx.Query(r.Context(), `
+		SELECT DISTINCT r.atividade
+		FROM ia_rotas r
+		JOIN ia_modelos m ON m.id = r.modelo_principal_id OR m.id = r.modelo_reserva_id
+		WHERE m.fornecedor_id = $1::uuid
+		ORDER BY r.atividade`, id)
+	if err != nil {
+		falhaInterna(w, err)
+		return
+	}
+	var emUso []string
+	for linhas.Next() {
+		var cod string
+		if err := linhas.Scan(&cod); err != nil {
+			linhas.Close()
+			falhaInterna(w, err)
+			return
+		}
+		nomeAtv := cod
+		if def, ok := mapaAtividades[cod]; ok {
+			nomeAtv = def.Nome
+		}
+		emUso = append(emUso, nomeAtv)
+	}
+	if err := linhas.Err(); err != nil {
+		linhas.Close()
+		falhaInterna(w, err)
+		return
+	}
+	linhas.Close()
+
+	if len(emUso) > 0 {
+		erro(w, 409, "fornecedor_em_uso", "Este fornecedor está em uso nas atividades: "+strings.Join(emUso, ", ")+". Troque o modelo antes de excluir.")
+		return
+	}
+
+	if _, err := tx.Exec(r.Context(), `DELETE FROM ia_precos WHERE modelo_id IN (SELECT id FROM ia_modelos WHERE fornecedor_id = $1::uuid)`, id); err != nil {
+		falhaInterna(w, err)
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `DELETE FROM ia_modelos WHERE fornecedor_id = $1::uuid`, id); err != nil {
+		falhaInterna(w, err)
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `DELETE FROM ia_fornecedores WHERE id = $1::uuid`, id); err != nil {
+		falhaInterna(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		falhaInterna(w, err)
+		return
+	}
+
+	slog.Info("fornecedor excluído", "fornecedorId", id, "usuarioId", s.usuario.ID)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) carregarFornecedor(ctx context.Context, id string) (Fornecedor, error) {
