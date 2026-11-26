@@ -32,6 +32,12 @@ func conectar(ctx context.Context, url string) (*Banco, error) {
 // migrar aplica, em ordem, os arquivos de migracoes/ que ainda não foram aplicados.
 // Cada arquivo roda numa transação; uma trava impede duas migrações ao mesmo tempo.
 func migrar(ctx context.Context, banco *Banco) error {
+	return migrarAte(ctx, banco, "")
+}
+
+// migrarAte aplica as migrações pendentes até o prefixo ou nome informado (inclusive).
+// Se limite for vazio, aplica todas as migrações disponíveis.
+func migrarAte(ctx context.Context, banco *Banco, limite string) error {
 	conn, err := banco.Acquire(ctx)
 	if err != nil {
 		return err
@@ -57,29 +63,31 @@ func migrar(ctx context.Context, banco *Banco) error {
 		if err := conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM migracoes_aplicadas WHERE nome = $1)`, nome).Scan(&existe); err != nil {
 			return err
 		}
-		if existe {
-			continue
+		if !existe {
+			sql, err := arquivosMigracao.ReadFile(caminho)
+			if err != nil {
+				return err
+			}
+			tx, err := conn.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, string(sql)); err != nil {
+				_ = tx.Rollback(ctx)
+				return fmt.Errorf("migração %s: %w", nome, err)
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO migracoes_aplicadas (nome) VALUES ($1)`, nome); err != nil {
+				_ = tx.Rollback(ctx)
+				return err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return err
+			}
+			slog.Info("migração aplicada", "nome", nome)
 		}
-		sql, err := arquivosMigracao.ReadFile(caminho)
-		if err != nil {
-			return err
+		if limite != "" && (nome == limite || strings.HasPrefix(nome, limite+"_")) {
+			break
 		}
-		tx, err := conn.Begin(ctx)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, string(sql)); err != nil {
-			_ = tx.Rollback(ctx)
-			return fmt.Errorf("migração %s: %w", nome, err)
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO migracoes_aplicadas (nome) VALUES ($1)`, nome); err != nil {
-			_ = tx.Rollback(ctx)
-			return err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return err
-		}
-		slog.Info("migração aplicada", "nome", nome)
 	}
 	return nil
 }

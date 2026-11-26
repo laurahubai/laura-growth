@@ -12,6 +12,7 @@ import {
   MembroEquipe,
   Modelo,
   OrganizacaoDetalhe,
+  PedidoConfirmarKit,
   PessoaMembro,
   Preco,
   RespostaAtividades,
@@ -27,10 +28,12 @@ import {
   RespostaPessoas,
   RespostaPrecos,
   RespostaRegistroAcessos,
+  RespostaVersoesKit,
   ResultadoAtividade,
   ResultadoTeste,
   RotaAtividade,
   Sessao,
+  VersaoKit,
   type Atividade,
   type KitMarca,
   type PedidoAceitarConvite,
@@ -122,23 +125,67 @@ export function useOrganizacaoAtiva(orgId: string) {
   });
 }
 
-// ---- Kit de marca (etapa 2) ----
+// ---- Kit de marca (etapas 2 e 2C) ----
 // As gravações levam a organização que a tela mostra; se ela não for mais a ativa,
 // o servidor recusa (409) em vez de gravar no kit de outra organização.
+
+export type PedidoSalvarKit = Omit<KitMarca, "atualizadoEm"> & {
+  versaoBase: number;
+};
 
 export function useKit(orgId: string) {
   return useQuery({
     queryKey: ["org", orgId, "kit"],
     queryFn: () => chamar("GET", "/api/kit", RespostaKit),
+    enabled: Boolean(orgId),
     retry: tentarSemBloqueio,
+    refetchOnWindowFocus: false,
   });
 }
 
 export function useSalvarKit(orgId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (kit: Omit<KitMarca, "atualizadoEm">) => chamar("PUT", "/api/kit", RespostaKit, { ...kit, organizacaoId: orgId }),
-    onSuccess: (r) => qc.setQueryData(["org", orgId, "kit"], r),
+    mutationFn: (kit: PedidoSalvarKit) => chamar("PUT", "/api/kit", RespostaKit, kit),
+    onSuccess: (r) => {
+      qc.setQueryData(["org", orgId, "kit"], r);
+      qc.invalidateQueries({ queryKey: ["org", orgId, "kit-versoes"] });
+    },
+  });
+}
+
+export function useConfirmarKit(orgId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (dados: Omit<PedidoConfirmarKit, "organizacaoId"> & { organizacaoId?: string }) =>
+      chamar(
+        "POST",
+        "/api/kit/confirmar",
+        RespostaKit,
+        PedidoConfirmarKit.parse({ ...dados, organizacaoId: dados.organizacaoId ?? orgId }),
+      ),
+    onSuccess: (r) => {
+      qc.setQueryData(["org", orgId, "kit"], r);
+      qc.invalidateQueries({ queryKey: ["org", orgId, "kit-versoes"] });
+    },
+  });
+}
+
+export function useVersoesKit(orgId: string, pagina = 1) {
+  return useQuery({
+    queryKey: ["org", orgId, "kit-versoes", pagina],
+    queryFn: () => chamar("GET", `/api/kit/versoes?pagina=${pagina}`, RespostaVersoesKit),
+    enabled: Boolean(orgId),
+    retry: tentarSemBloqueio,
+  });
+}
+
+export function useVersaoKit(orgId: string, numero: number | null) {
+  return useQuery({
+    queryKey: ["org", orgId, "kit-versao", numero],
+    queryFn: () => chamar("GET", `/api/kit/versoes/${numero}`, VersaoKit),
+    enabled: Boolean(orgId) && numero !== null && Number.isInteger(numero) && numero > 0,
+    retry: tentarSemBloqueio,
   });
 }
 
@@ -151,7 +198,10 @@ export function useEnviarArquivo(orgId: string) {
       const q = new URLSearchParams({ tipo, organizacaoId: orgId });
       return chamar("POST", `/api/kit/arquivos?${q}`, ArquivoMarca, f);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["org", orgId, "kit"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org", orgId, "kit"] });
+      qc.invalidateQueries({ queryKey: ["org", orgId, "kit-versoes"] });
+    },
   });
 }
 
@@ -159,7 +209,10 @@ export function useRemoverArquivo(orgId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => chamar("DELETE", `/api/kit/arquivos/${encodeURIComponent(id)}?${new URLSearchParams({ organizacaoId: orgId })}`, null),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["org", orgId, "kit"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org", orgId, "kit"] });
+      qc.invalidateQueries({ queryKey: ["org", orgId, "kit-versoes"] });
+    },
   });
 }
 
