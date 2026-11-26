@@ -150,7 +150,8 @@ export const RespostaKit = z.object({
 export type RespostaKit = z.infer<typeof RespostaKit>;
 
 // ---- Etapa 2C: gravação, confirmação e versões ----
-// PUT /api/kit: corpo = campos editáveis do KitMarca (sem organizacaoId/atualizadoEm) + versaoBase.
+// PUT /api/kit: corpo = campos editáveis do KitMarca + organizacaoId (trava da etapa 2: 409 "organizacao_trocada"
+// se não for a organização ativa) + versaoBase; atualizadoEm é ignorado.
 // Resposta 200 = RespostaKit. 409 codigo "kit_desatualizado" quando versaoBase != versão atual,
 // mensagem "O kit foi alterado por outra pessoa. Recarregue para ver a versão atual."
 // 400 codigo "dados_invalidos" para modelo/canal inválido ou tamanho excedido.
