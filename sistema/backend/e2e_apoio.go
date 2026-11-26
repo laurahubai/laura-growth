@@ -8,17 +8,21 @@
 //	go run ./e2e_apoio.go limpar
 //	go run ./e2e_apoio.go expirar-convite <email>
 //	go run ./e2e_apoio.go semear-pendentes <orgNome> <quantidade>
+//	go run ./e2e_apoio.go sugerir-kit <orgNome> <campoKit> <valorTexto>
 package main
 
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -217,6 +221,163 @@ func main() {
 				fmt.Fprintf(os.Stderr, "erro ao limpar organização temporária E2E: %v\n", err)
 				os.Exit(1)
 			}
+		}
+		return
+
+	case "sugerir-kit":
+		if len(os.Args) < 5 {
+			fmt.Fprintln(os.Stderr, "uso: sugerir-kit <orgNome> <campoKit> <valorTexto>")
+			os.Exit(2)
+		}
+		orgNome := strings.TrimSpace(os.Args[2])
+		campo := strings.TrimSpace(os.Args[3])
+		valor := strings.TrimSpace(os.Args[4])
+		if orgNome == "" || campo == "" {
+			fmt.Fprintln(os.Stderr, "uso: sugerir-kit <orgNome> <campoKit> <valorTexto>")
+			os.Exit(2)
+		}
+		if utf8.RuneCountInString(valor) > 5000 {
+			fmt.Fprintln(os.Stderr, "valorTexto excede 5000 caracteres")
+			os.Exit(2)
+		}
+		colunasTexto := map[string]struct{ coluna, origemCampo string }{
+			"site":            {"site", "site"},
+			"perfis":          {"perfis", "perfis"},
+			"tomDeVoz":        {"tom_de_voz", "tomDeVoz"},
+			"publico":         {"publico", "publico"},
+			"temas":           {"temas", "temas"},
+			"nuncaDizer":      {"nunca_dizer", "nuncaDizer"},
+			"fontes":          {"fontes", "fontes"},
+			"exemplos":        {"exemplos", "exemplos"},
+			"diferencial":     {"diferencial", "diferencial"},
+			"modeloNegocio":   {"modelo_negocio", "modeloNegocio"},
+			"modeloOutro":     {"modelo_outro", "modeloNegocio"},
+			"regioes":         {"regioes", "regioes"},
+			"comoCompram":     {"como_compram", "comoCompram"},
+			"maiorDesafio":    {"maior_desafio", "maiorDesafio"},
+			"objetivo90Dias":  {"objetivo_90_dias", "objetivo90Dias"},
+			"canaisOutro":     {"canais_outro", "canais"},
+			"restricoesSetor": {"restricoes_setor", "restricoesSetor"},
+		}
+		alvo, ok := colunasTexto[campo]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "campoKit de texto desconhecido: %s\n", campo)
+			os.Exit(2)
+		}
+		if campo == "site" && valor != "" {
+			u, err := url.Parse(valor)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				fmt.Fprintln(os.Stderr, "site inválido: informe endereço http:// ou https://")
+				os.Exit(2)
+			}
+		}
+		if campo == "modeloNegocio" && valor != "" && valor != "b2b" && valor != "b2c" && valor != "b2b2c" && valor != "outro" {
+			fmt.Fprintln(os.Stderr, "modeloNegocio inválido")
+			os.Exit(2)
+		}
+
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao iniciar transação: %v\n", err)
+			os.Exit(1)
+		}
+		defer tx.Rollback(ctx) //nolint:errcheck
+
+		var orgID string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM organizacoes WHERE nome = $1 FOR UPDATE`, orgNome).Scan(&orgID); err != nil {
+			fmt.Fprintf(os.Stderr, "organização não encontrada: %v\n", err)
+			os.Exit(1)
+		}
+		agora := time.Now().UTC()
+		queryKit := fmt.Sprintf(`
+			INSERT INTO kits_marca (organizacao_id, %s, atualizado_em, atualizado_por)
+			VALUES ($1::uuid, $2, $3, NULL)
+			ON CONFLICT (organizacao_id) DO UPDATE SET
+				%s = EXCLUDED.%s,
+				atualizado_em = EXCLUDED.atualizado_em,
+				atualizado_por = NULL`, alvo.coluna, alvo.coluna, alvo.coluna)
+		if _, err := tx.Exec(ctx, queryKit, orgID, valor, agora); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao atualizar kit: %v\n", err)
+			os.Exit(1)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO kit_origens (organizacao_id, campo, origem, definido_por, definido_em)
+			VALUES ($1::uuid, $2, 'sugerido_ia', NULL, $3)
+			ON CONFLICT (organizacao_id, campo) DO UPDATE SET
+				origem = 'sugerido_ia',
+				definido_por = NULL,
+				definido_em = EXCLUDED.definido_em`, orgID, alvo.origemCampo, agora); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao gravar origem sugerido_ia: %v\n", err)
+			os.Exit(1)
+		}
+		var dadosJSON, origensJSON []byte
+		if err := tx.QueryRow(ctx, `
+			SELECT
+				jsonb_build_object(
+					'site', k.site,
+					'perfis', k.perfis,
+					'tomDeVoz', k.tom_de_voz,
+					'publico', k.publico,
+					'temas', k.temas,
+					'nuncaDizer', k.nunca_dizer,
+					'fontes', k.fontes,
+					'exemplos', k.exemplos,
+					'pilares', to_jsonb(k.pilares),
+					'cores', to_jsonb(k.cores),
+					'produtos', k.produtos,
+					'diferencial', k.diferencial,
+					'modeloNegocio', k.modelo_negocio,
+					'modeloOutro', k.modelo_outro,
+					'regioes', k.regioes,
+					'comoCompram', k.como_compram,
+					'maiorDesafio', k.maior_desafio,
+					'objetivo90Dias', k.objetivo_90_dias,
+					'canais', to_jsonb(k.canais),
+					'canaisOutro', k.canais_outro,
+					'restricoesSetor', k.restricoes_setor,
+					'atualizadoEm', to_jsonb(k.atualizado_em)
+				),
+				COALESCE(
+					(
+						SELECT jsonb_object_agg(
+							ko.campo,
+							jsonb_build_object(
+								'origem', ko.origem,
+								'definidoPor', u.nome,
+								'definidoEm', to_jsonb(ko.definido_em)
+							)
+						)
+						FROM kit_origens ko
+						LEFT JOIN usuarios u ON u.id = ko.definido_por
+						WHERE ko.organizacao_id = k.organizacao_id
+					),
+					'{}'::jsonb
+				)
+			FROM kits_marca k
+			WHERE k.organizacao_id = $1::uuid`, orgID).Scan(&dadosJSON, &origensJSON); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao ler estado do kit: %v\n", err)
+			os.Exit(1)
+		}
+		var proximoNumero int
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(numero), 0) + 1 FROM kit_versoes WHERE organizacao_id = $1::uuid`, orgID).Scan(&proximoNumero); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao calcular versão do kit: %v\n", err)
+			os.Exit(1)
+		}
+		// Validação rápida de JSON antes de inserir
+		if !json.Valid(dadosJSON) || !json.Valid(origensJSON) {
+			fmt.Fprintln(os.Stderr, "json inválido ao montar versão")
+			os.Exit(1)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO kit_versoes (organizacao_id, numero, dados, origens, campos_alterados, autor_id, autor_tipo, criado_em)
+			VALUES ($1::uuid, $2, $3::jsonb, $4::jsonb, $5, NULL, 'ia', $6)`,
+			orgID, proximoNumero, string(dadosJSON), string(origensJSON), []string{alvo.origemCampo}, agora); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao gravar versão da IA: %v\n", err)
+			os.Exit(1)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao confirmar transação: %v\n", err)
+			os.Exit(1)
 		}
 		return
 
