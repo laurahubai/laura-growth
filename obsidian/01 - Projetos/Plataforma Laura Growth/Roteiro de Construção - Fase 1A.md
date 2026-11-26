@@ -133,11 +133,13 @@ Permissão da equipe Laura (não é alçada da organização): cadastrar fornece
 **Requisitos:** MKT-01, MKT-04; PRD 2.0 RF-02, RF-03, RF-10.
 
 Pronto quando:
-- [ ] O kit tem também: produtos ou serviços e qual priorizar, diferencial, modelo (B2B, B2C…), regiões, como os clientes compram, maior desafio, objetivo dos próximos 90 dias e canais escolhidos.
-- [ ] "O que evitar" fica em destaque (inclui as restrições do setor informadas pelo cliente).
-- [ ] Cada informação mostra se foi **confirmada por você** ou **sugerida pela IA**.
-- [ ] Toda gravação gera uma versão; você vê as anteriores e quem mudou.
-- [ ] Os dados já cadastrados no kit continuam lá.
+- [x] O kit tem também: produtos ou serviços e qual priorizar, diferencial, modelo (B2B, B2C…), regiões, como os clientes compram, maior desafio, objetivo dos próximos 90 dias e canais escolhidos.
+- [x] "O que evitar" fica em destaque (inclui as restrições do setor informadas pelo cliente).
+- [x] Cada informação mostra se foi **confirmada por você** ou **sugerida pela IA**.
+- [x] Toda gravação gera uma versão; você vê as anteriores e quem mudou.
+- [x] Os dados já cadastrados no kit continuam lá.
+
+*Verificado em 26/11/2026 por testes automáticos (ver [[Especificação - Etapa 2C]] e [[Relatório - Etapa 2C]]). A sugestão da IA já tem o registro pronto, mas só passa a acontecer de fato com o Chat do CMO (2D).*
 
 ## Etapa 2D — Chat do CMO
 **Constrói:** o onboarding como conversa entre o CMO de IA e a pessoa, construindo as respostas juntos. Substitui o onboarding de 4 passos do protótipo, que vira a barra de progresso ao lado.
