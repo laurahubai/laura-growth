@@ -118,11 +118,13 @@ A 2A-2 não bloqueia as etapas seguintes: a 2B pode começar quando a 2A-1 estiv
 **Requisitos:** [[PRD - Permissões e Aprovações]]; PRD 2.0 §3.
 
 Pronto quando:
-- [ ] Você convida uma pessoa por e-mail para uma organização.
-- [ ] Você marca as alçadas dela uma a uma.
-- [ ] Uma pessoa sem a alçada não consegue fazer a ação, nem forçando pelo endereço da página (verificação no servidor).
+- [x] Você convida uma pessoa por e-mail para uma organização.
+- [x] Você marca as alçadas dela uma a uma.
+- [x] Uma pessoa sem a alçada não consegue fazer a ação, nem forçando pelo endereço da página (verificação no servidor).
 
-Lista de alçadas proposta *(a confirmar)*: ver a marca e os posts; conversar com o CMO e editar o DNA da marca; aprovar o plano de marketing; criar e editar posts; aprovar posts para publicação; conectar e desconectar redes; ver custos (US$ ou só créditos); convidar pessoas e dar acessos.
+*Verificado em 26/11/2026 por testes automáticos. O envio real do e-mail depende da chave do Zoho no `.env` (a preencher); até lá, o convite fica "não enviado" e o link pode ser copiado na tela.*
+
+Lista de alçadas *(confirmada por Paulo em 26/11/2026; ver [[Especificação - Etapa 2B]] e [[Relatório - Etapa 2B]])*: ver a marca e os posts; conversar com o CMO e editar o DNA da marca; aprovar o plano de marketing; criar e editar posts; aprovar posts para publicação; conectar e desconectar redes; ver custos (US$ ou só créditos); convidar pessoas e dar acessos.
 
 Permissão da equipe Laura (não é alçada da organização): cadastrar fornecedores de IA. Até a 2B, só o administrador da plataforma (decidido em 2026-11-24; [[prd-lauragrowth20|PRD 2.0]] §8.3).
 

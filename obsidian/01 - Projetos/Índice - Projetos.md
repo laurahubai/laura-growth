@@ -20,5 +20,7 @@ Projetos têm **começo, fim e entrega**. Quando terminam, vão para [[Índice -
 | Plataforma Laura Growth (adequação ao PRD 2.0) | aprovado | [[Adequação ao PRD 2.0]] |
 | Plataforma Laura Growth (revisão do PRD 2.0 para a etapa 2A) | aprovado | [[Revisão PRD 2.0 - Etapa 2A]] |
 | Plataforma Laura Growth (spec da etapa 2A-1) | rascunho | [[Especificação - Etapa 2A-1]] |
+| Plataforma Laura Growth (spec da etapa 2B) | aprovado | [[Especificação - Etapa 2B]] |
+| Plataforma Laura Growth (relatório da etapa 2B) | em validação | [[Relatório - Etapa 2B]] |
 
 Modelo para novos: [[Template - Projeto]] · Voltar: [[Home]]

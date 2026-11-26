@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, FileText, Plus, Trash2, Upload, X } from "lucide-react";
 import { LIMITES_KIT, type ArquivoMarca, type KitMarca } from "@laura-growth/contratos";
-import { urlArquivo, useEnviarArquivo, useKit, useRemoverArquivo, useSalvarKit, useSessao } from "@/lib/api";
+import { SemAcesso } from "@/components/SemAcesso";
+import { erroSemPermissao, urlArquivo, useEnviarArquivo, useKit, useRemoverArquivo, useSalvarKit, useSessao } from "@/lib/api";
 
 type Rascunho = Omit<KitMarca, "atualizadoEm">;
 type CampoTexto = "site" | "perfis" | "tomDeVoz" | "publico" | "temas" | "nuncaDizer" | "fontes" | "exemplos";
@@ -41,10 +42,24 @@ export default function Kit() {
   }, [kit.data, alterado]);
 
   if (!sessao) return null;
-  if (kit.isPending || !r) return <p className="muted">Carregando…</p>;
+  if (kit.isPending) return <p className="muted">Carregando…</p>;
+  if (erroSemPermissao(kit.error)) {
+    return (
+      <SemAcesso
+        mensagem={kit.error instanceof Error ? kit.error.message : "Você não tem permissão para ver o kit de marca."}
+      />
+    );
+  }
   if (kit.isError) return <p role="alert" style={{ color: "var(--laura-danger)" }}>{kit.error.message}</p>;
+  if (!r) return <p className="muted">Carregando…</p>;
 
-  const mudar = (novo: Rascunho) => { setR(novo); setAlterado(true); salvar.reset(); };
+  const podeEditar = sessao.alcadas.includes("cmo_dna");
+  const mudar = (novo: Rascunho) => {
+    if (!podeEditar) return;
+    setR(novo);
+    setAlterado(true);
+    salvar.reset();
+  };
   const pilaresPreenchidos = r.pilares.filter((p) => p.trim()).length;
   const atualizado = kit.data.kit.atualizadoEm;
 
@@ -56,10 +71,16 @@ export default function Kit() {
           <p>Base que os agentes usam para criar os posts da <b>{sessao.organizacaoAtiva.nome}</b>. Nunca é usado em outra organização.</p>
         </div>
       </div>
+      {!podeEditar && (
+        <div className="alerta t-info" style={{ marginBottom: 16 }}>
+          Modo somente leitura: você pode consultar o kit de marca, mas não tem alçada para editá-lo.
+        </div>
+      )}
       <form
         className="grid g2"
         onSubmit={(e) => {
           e.preventDefault();
+          if (!podeEditar) return;
           salvar.mutate(r, { onSuccess: () => setAlterado(false) });
         }}
       >
@@ -68,22 +89,24 @@ export default function Kit() {
             <label key={c.k} className="campo">
               {c.rotulo}
               {c.longo ? (
-                <textarea value={r[c.k]} maxLength={LIMITES_KIT.textoMax} onChange={(e) => mudar({ ...r, [c.k]: e.target.value })} />
+                <textarea value={r[c.k]} maxLength={LIMITES_KIT.textoMax} disabled={!podeEditar} onChange={(e) => mudar({ ...r, [c.k]: e.target.value })} />
               ) : (
-                <input value={r[c.k]} maxLength={LIMITES_KIT.textoMax} type={c.k === "site" ? "url" : "text"} onChange={(e) => mudar({ ...r, [c.k]: e.target.value })} />
+                <input value={r[c.k]} maxLength={LIMITES_KIT.textoMax} disabled={!podeEditar} type={c.k === "site" ? "url" : "text"} onChange={(e) => mudar({ ...r, [c.k]: e.target.value })} />
               )}
               {c.dica && <span className="small muted">{c.dica}</span>}
             </label>
           ))}
-          <div className="row" style={{ borderTop: "1px solid var(--laura-border)", paddingTop: 12 }}>
-            <button className="btn primario" type="submit" disabled={salvar.isPending || !alterado || coresInvalidas.size > 0}>
-              {salvar.isPending ? "Salvando…" : "Salvar kit de marca"}
-            </button>
-            {salvar.isSuccess && !alterado && <span role="status" style={{ color: "var(--laura-success)" }}>Kit salvo.</span>}
-            {alterado && !salvar.isPending && <span className="small muted">Alterações não salvas.</span>}
-            {coresInvalidas.size > 0 && <span role="alert" style={{ color: "var(--laura-danger)" }}>Corrija o código da cor antes de salvar.</span>}
-            {salvar.isError && <span role="alert" style={{ color: "var(--laura-danger)" }}>{salvar.error.message}</span>}
-          </div>
+          {podeEditar && (
+            <div className="row" style={{ borderTop: "1px solid var(--laura-border)", paddingTop: 12 }}>
+              <button className="btn primario" type="submit" disabled={salvar.isPending || !alterado || coresInvalidas.size > 0}>
+                {salvar.isPending ? "Salvando…" : "Salvar kit de marca"}
+              </button>
+              {salvar.isSuccess && !alterado && <span role="status" style={{ color: "var(--laura-success)" }}>Kit salvo.</span>}
+              {alterado && !salvar.isPending && <span className="small muted">Alterações não salvas.</span>}
+              {coresInvalidas.size > 0 && <span role="alert" style={{ color: "var(--laura-danger)" }}>Corrija o código da cor antes de salvar.</span>}
+              {salvar.isError && <span role="alert" style={{ color: "var(--laura-danger)" }}>{salvar.error.message}</span>}
+            </div>
+          )}
           {atualizado && <p className="small muted" style={{ margin: 0 }}>Última gravação: {new Date(atualizado).toLocaleString("pt-BR")}</p>}
         </section>
 
@@ -99,18 +122,21 @@ export default function Kit() {
                     style={{ minHeight: 72 }}
                     autoFocus={focar?.lista === "pilares" && focar.i === i}
                     value={p}
+                    disabled={!podeEditar}
                     maxLength={LIMITES_KIT.pilarMax}
                     aria-label={`Pilar ${i + 1}`}
                     onChange={(e) => mudar({ ...r, pilares: r.pilares.map((x, j) => (j === i ? e.target.value : x)) })}
                   />
                   <span className="small muted num" style={{ alignSelf: "flex-end" }}>{p.length}/{LIMITES_KIT.pilarMax}</span>
                 </div>
-                <button type="button" className="btn peq" aria-label={`Remover pilar ${i + 1}`} onClick={() => mudar({ ...r, pilares: r.pilares.filter((_, j) => j !== i) })}>
-                  <X size={14} aria-hidden />
-                </button>
+                {podeEditar && (
+                  <button type="button" className="btn peq" aria-label={`Remover pilar ${i + 1}`} onClick={() => mudar({ ...r, pilares: r.pilares.filter((_, j) => j !== i) })}>
+                    <X size={14} aria-hidden />
+                  </button>
+                )}
               </div>
             ))}
-            {r.pilares.length < LIMITES_KIT.pilaresMax && (
+            {podeEditar && r.pilares.length < LIMITES_KIT.pilaresMax && (
               <button type="button" className="btn peq" style={{ alignSelf: "flex-start" }} onClick={() => { setFocar({ lista: "pilares", i: r.pilares.length }); mudar({ ...r, pilares: [...r.pilares, ""] }); }}>
                 <Plus size={14} aria-hidden /> Adicionar pilar
               </button>
@@ -125,23 +151,26 @@ export default function Kit() {
                 <CampoCor
                   cor={c}
                   indice={i}
+                  desabilitado={!podeEditar}
                   onCor={(nova) => mudar({ ...r, cores: r.cores.map((x, j) => (j === i ? nova : x)) })}
                   onValida={(ok) => setCoresInvalidas((s) => { const n = new Set(s); if (ok) n.delete(i); else n.add(i); return n; })}
                 />
                 <span className="small muted">{NOMES_CORES[i] ?? "Apoio"}</span>
-                <button type="button" className="btn peq" style={{ marginLeft: "auto" }} aria-label={`Remover cor ${i + 1}`} onClick={() => { setCoresInvalidas(new Set()); setVersaoCores((v) => v + 1); mudar({ ...r, cores: r.cores.filter((_, j) => j !== i) }); }}>
-                  <X size={14} aria-hidden />
-                </button>
+                {podeEditar && (
+                  <button type="button" className="btn peq" style={{ marginLeft: "auto" }} aria-label={`Remover cor ${i + 1}`} onClick={() => { setCoresInvalidas(new Set()); setVersaoCores((v) => v + 1); mudar({ ...r, cores: r.cores.filter((_, j) => j !== i) }); }}>
+                    <X size={14} aria-hidden />
+                  </button>
+                )}
               </div>
             ))}
-            {r.cores.length < LIMITES_KIT.coresMax && (
+            {podeEditar && r.cores.length < LIMITES_KIT.coresMax && (
               <button type="button" className="btn peq" style={{ alignSelf: "flex-start" }} onClick={() => mudar({ ...r, cores: [...r.cores, "#000000"] })}>
                 <Plus size={14} aria-hidden /> Adicionar cor
               </button>
             )}
           </section>
 
-          <Arquivos orgId={orgId} arquivos={kit.data.arquivos} cor={r.cores[0]} inicial={sessao.organizacaoAtiva.nome[0]} />
+          <Arquivos orgId={orgId} arquivos={kit.data.arquivos} cor={r.cores[0]} inicial={sessao.organizacaoAtiva.nome[0]} podeEditar={podeEditar} />
         </div>
       </form>
     </>
@@ -149,7 +178,7 @@ export default function Kit() {
 }
 
 // Seletor de cor + campo para digitar o código hexa (#RRGGBB, aceita sem # e minúsculas).
-function CampoCor({ cor, indice, onCor, onValida }: { cor: string; indice: number; onCor: (c: string) => void; onValida: (ok: boolean) => void }) {
+function CampoCor({ cor, indice, desabilitado, onCor, onValida }: { cor: string; indice: number; desabilitado: boolean; onCor: (c: string) => void; onValida: (ok: boolean) => void }) {
   const [texto, setTexto] = useState(cor);
   const normalizar = (t: string) => {
     const s = t.trim().replace(/^#?/, "#");
@@ -165,11 +194,12 @@ function CampoCor({ cor, indice, onCor, onValida }: { cor: string; indice: numbe
 
   return (
     <>
-      <input type="color" value={cor} aria-label={`Cor ${indice + 1}`} onChange={(e) => onCor(e.target.value)} />
+      <input type="color" value={cor} disabled={desabilitado} aria-label={`Cor ${indice + 1}`} onChange={(e) => onCor(e.target.value)} />
       <input
         className="num"
         style={{ width: "9ch", borderColor: valido ? undefined : "var(--laura-danger)" }}
         value={texto}
+        disabled={desabilitado}
         maxLength={7}
         placeholder="#RRGGBB"
         spellCheck={false}
@@ -187,7 +217,7 @@ function CampoCor({ cor, indice, onCor, onValida }: { cor: string; indice: numbe
   );
 }
 
-function Arquivos({ orgId, arquivos, cor, inicial }: { orgId: string; arquivos: ArquivoMarca[]; cor?: string; inicial: string }) {
+function Arquivos({ orgId, arquivos, cor, inicial, podeEditar }: { orgId: string; arquivos: ArquivoMarca[]; cor?: string; inicial: string; podeEditar: boolean }) {
   const enviar = useEnviarArquivo(orgId);
   const remover = useRemoverArquivo(orgId);
   const campoLogo = useRef<HTMLInputElement>(null);
@@ -198,7 +228,7 @@ function Arquivos({ orgId, arquivos, cor, inicial }: { orgId: string; arquivos: 
   const escolher = (tipo: "logo" | "referencia") => (e: React.ChangeEvent<HTMLInputElement>) => {
     const arquivo = e.target.files?.[0];
     e.target.value = "";
-    if (!arquivo) return;
+    if (!arquivo || !podeEditar) return;
     if (arquivo.size > LIMITES_KIT.arquivoMaxMB * 1024 * 1024) {
       enviar.reset();
       alert(`O arquivo pode ter no máximo ${LIMITES_KIT.arquivoMaxMB} MB.`);
@@ -207,6 +237,7 @@ function Arquivos({ orgId, arquivos, cor, inicial }: { orgId: string; arquivos: 
     enviar.mutate({ tipo, arquivo });
   };
   const apagar = (a: ArquivoMarca) => {
+    if (!podeEditar) return;
     if (confirm(`Remover "${a.nome}"? Não dá para desfazer.`)) remover.mutate(a.id);
   };
 
@@ -221,19 +252,21 @@ function Arquivos({ orgId, arquivos, cor, inicial }: { orgId: string; arquivos: 
           ) : (
             <span className="logo-mark" style={{ width: 64, height: 64, background: cor ?? "var(--laura-brand)", fontSize: 26 }} aria-hidden>{inicial}</span>
           )}
-          <div className="stack" style={{ gap: 6 }}>
-            <button type="button" className="btn peq" onClick={() => campoLogo.current?.click()} disabled={enviar.isPending}>
-              <Upload size={14} aria-hidden /> {logo ? "Trocar logo" : "Enviar logo"}
-            </button>
-            {logo && (
-              <button type="button" className="btn peq" onClick={() => apagar(logo)} disabled={remover.isPending}>
-                <Trash2 size={14} aria-hidden /> Remover
+          {podeEditar && (
+            <div className="stack" style={{ gap: 6 }}>
+              <button type="button" className="btn peq" onClick={() => campoLogo.current?.click()} disabled={enviar.isPending}>
+                <Upload size={14} aria-hidden /> {logo ? "Trocar logo" : "Enviar logo"}
               </button>
-            )}
-          </div>
+              {logo && (
+                <button type="button" className="btn peq" onClick={() => apagar(logo)} disabled={remover.isPending}>
+                  <Trash2 size={14} aria-hidden /> Remover
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <span className="small muted">PNG, JPG ou WebP, até {LIMITES_KIT.arquivoMaxMB} MB.</span>
-        <input ref={campoLogo} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={escolher("logo")} />
+        {podeEditar && <input ref={campoLogo} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={escolher("logo")} />}
       </section>
 
       <section className="card stack">
@@ -246,13 +279,19 @@ function Arquivos({ orgId, arquivos, cor, inicial }: { orgId: string; arquivos: 
             <a href={urlArquivo(a.id)} target="_blank" rel="noopener" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.nome}</a>
             <span className="small muted num" style={{ flex: "none" }}>{(a.tamanho / 1024 / 1024).toFixed(1)} MB</span>
             <a className="btn peq" href={urlArquivo(a.id, true)} aria-label={`Baixar ${a.nome}`}><Download size={14} aria-hidden /></a>
-            <button type="button" className="btn peq" aria-label={`Remover ${a.nome}`} onClick={() => apagar(a)} disabled={remover.isPending}><Trash2 size={14} aria-hidden /></button>
+            {podeEditar && (
+              <button type="button" className="btn peq" aria-label={`Remover ${a.nome}`} onClick={() => apagar(a)} disabled={remover.isPending}><Trash2 size={14} aria-hidden /></button>
+            )}
           </div>
         ))}
-        <button type="button" className="btn peq" style={{ alignSelf: "flex-start" }} onClick={() => campoRef.current?.click()} disabled={enviar.isPending}>
-          <Upload size={14} aria-hidden /> {enviar.isPending ? "Enviando…" : "Enviar arquivo"}
-        </button>
-        <input ref={campoRef} type="file" accept="image/png,image/jpeg,image/webp,application/pdf" hidden onChange={escolher("referencia")} />
+        {podeEditar && (
+          <>
+            <button type="button" className="btn peq" style={{ alignSelf: "flex-start" }} onClick={() => campoRef.current?.click()} disabled={enviar.isPending}>
+              <Upload size={14} aria-hidden /> {enviar.isPending ? "Enviando…" : "Enviar arquivo"}
+            </button>
+            <input ref={campoRef} type="file" accept="image/png,image/jpeg,image/webp,application/pdf" hidden onChange={escolher("referencia")} />
+          </>
+        )}
         {enviar.isError && <span role="alert" style={{ color: "var(--laura-danger)" }}>{enviar.error.message}</span>}
         {remover.isError && <span role="alert" style={{ color: "var(--laura-danger)" }}>{remover.error.message}</span>}
       </section>

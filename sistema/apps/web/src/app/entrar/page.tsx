@@ -15,7 +15,14 @@ export default function Entrar() {
       for (const p of v.error.issues) setError(p.path[0] as keyof PedidoEntrar, { message: p.message });
       return;
     }
-    entrar.mutate(v.data, { onSuccess: () => router.replace("/inicio") });
+    entrar.mutate(v.data, {
+      onSuccess: () => {
+        const proximo =
+          typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("proximo") : null;
+        const destino = proximo && /^\/convite\/[A-Za-z0-9_-]+$/.test(proximo) ? proximo : "/inicio";
+        router.replace(destino);
+      },
+    });
   });
 
   const falha = entrar.error instanceof FalhaApi ? entrar.error.message : entrar.error ? "Não foi possível entrar. Tente de novo." : "";
