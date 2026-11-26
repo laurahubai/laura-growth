@@ -178,13 +178,18 @@ func TestAC36AtividadesIncompletasERegrasDeRota(t *testing.T) {
 
 	_, modTxt, _, modTxtRes, modImg, _ := prepararSimuladosCompletos(t, c)
 
-	// Inicialmente todas as 6 atividades vêm incompletas.
+	// Inicialmente todas as 6 atividades vêm incompletas, faltando apenas o modelo principal (reserva é opcional, J3).
 	var atvs RespostaAtividades
 	if st := c.pedir("GET", "/api/admin/atividades", nil, &atvs); st != 200 || len(atvs.Atividades) != 6 {
 		t.Fatalf("GET atividades inesperado: %d len=%d", st, len(atvs.Atividades))
 	}
-	if atvs.Atividades[0].Pronta || len(atvs.Atividades[0].Falta) != 2 {
-		t.Fatalf("atividade inicial deveria faltar principal e reserva: %+v", atvs.Atividades[0])
+	if atvs.Atividades[0].Pronta || len(atvs.Atividades[0].Falta) != 1 || atvs.Atividades[0].Falta[0] != "modelo principal" {
+		t.Fatalf("atividade inicial deveria faltar apenas modelo principal: %+v", atvs.Atividades[0])
+	}
+	stSemPrincipal, bodySemPrincipal := c.pedirComCorpo("POST", "/api/admin/atividades/texto/testar", nil)
+	if stSemPrincipal != 409 || !strings.Contains(string(bodySemPrincipal), "atividade_incompleta") ||
+		!strings.Contains(string(bodySemPrincipal), "modelo principal") || strings.Contains(string(bodySemPrincipal), "modelo reserva") {
+		t.Fatalf("esperava 409 atividade_incompleta citando apenas modelo principal, veio %d (%s)", stSemPrincipal, bodySemPrincipal)
 	}
 
 	// Serviço incompatível -> 400 servico_incompativel; modelos iguais -> 400 modelos_iguais.
@@ -199,16 +204,19 @@ func TestAC36AtividadesIncompletasERegrasDeRota(t *testing.T) {
 		t.Fatalf("esperava 400 modelos_iguais, veio %d (%s)", st, body)
 	}
 
-	// Atividade só com principal (sem reserva) não roda: 409 atividade_incompleta dizendo o que falta.
+	// Atividade só com principal (sem reserva) fica pronta e roda normalmente (J3).
 	var rota RotaAtividade
 	if st := c.pedir("PUT", "/api/admin/atividades/texto", map[string]any{
 		"modeloPrincipalId": modTxt, "modeloReservaId": nil,
-	}, &rota); st != 200 || rota.Pronta || len(rota.Falta) != 1 || rota.Falta[0] != "modelo reserva" {
-		t.Fatalf("rota sem reserva inesperada: %d %+v", st, rota)
+	}, &rota); st != 200 || !rota.Pronta || len(rota.Falta) != 0 {
+		t.Fatalf("rota só com principal deveria estar pronta: %d %+v", st, rota)
 	}
-	st, body := c.pedirComCorpo("POST", "/api/admin/atividades/texto/testar", nil)
-	if st != 409 || !strings.Contains(string(body), "atividade_incompleta") || !strings.Contains(string(body), "modelo reserva") {
-		t.Fatalf("esperava 409 atividade_incompleta citando reserva, veio %d (%s)", st, body)
+	var resTeste ResultadoAtividade
+	if st := c.pedir("POST", "/api/admin/atividades/texto/testar", nil, &resTeste); st != 200 {
+		t.Fatalf("testar atividade só com principal esperava 200, veio %d", st)
+	}
+	if resTeste.AtendidoPelaReserva || resTeste.AtendidoPor.ID != modTxt || len(resTeste.Tentativas) != 1 || resTeste.Tentativas[0].Status != "ok" {
+		t.Fatalf("resultado só com principal inesperado: %+v", resTeste)
 	}
 }
 
@@ -795,5 +803,107 @@ func TestGravacaoExecucaoSobreviveCancelamentoDoCliente(t *testing.T) {
 	}
 	if status != "ok" || tokensIn != 12 || tokensOut != 18 || custo <= 0 {
 		t.Fatalf("dados inesperados no registro gravado: status=%s in=%d out=%d custo=%v", status, tokensIn, tokensOut, custo)
+	}
+}
+
+func TestJ2EJ3Erro400FornecedorEAtividadeSemReserva(t *testing.T) {
+	api := novaAPIAdminTeste(t)
+	c := novoCliente(t, api)
+	entrarComoPaulo(t, c)
+
+	const segredoBruto = "raw-provider-body-secret-marker"
+	srv400 := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"` + segredoBruto + ` ` + chaveAPITeste + `"}}`))
+	}))
+	defer srv400.Close()
+
+	api.permitirRedeInterna = true
+	api.tlsTeste = srv400.Client().Transport.(*http.Transport).TLSClientConfig
+
+	var forn Fornecedor
+	if st := c.pedir("POST", "/api/admin/fornecedores", map[string]any{
+		"nome":            "OpenAI 400",
+		"tipo":            "compativel_openai",
+		"endereco":        srv400.URL + "/v1",
+		"chave":           chaveAPITeste,
+		"limiteMensalUsd": 50,
+	}, &forn); st != 201 {
+		t.Fatalf("criar fornecedor falhou: %d", st)
+	}
+	var modImg Modelo
+	if st := c.pedir("POST", "/api/admin/fornecedores/"+forn.ID+"/modelos", map[string]any{
+		"identificador": "chatgpt-image-latest", "servico": "imagem", "origem": "manual",
+	}, &modImg); st != 201 {
+		t.Fatalf("criar modelo falhou: %d", st)
+	}
+	if st := c.pedir("POST", "/api/admin/modelos/"+modImg.ID+"/precos", map[string]any{
+		"unidade": "imagem", "precoUsd": 0.04, "vigenciaInicio": "2026-11-01",
+	}, nil); st != 201 {
+		t.Fatalf("criar preço falhou: %d", st)
+	}
+
+	const msgEsperada = "O fornecedor retornou um erro (400)."
+
+	// J2: testar modelo com resposta 400 do fornecedor devolve a mensagem segura gravada em ia_execucoes.erro.
+	stMod, bodyMod := c.pedirComCorpo("POST", "/api/admin/modelos/"+modImg.ID+"/testar", nil)
+	if stMod != 502 {
+		t.Fatalf("testar modelo 400 esperava 502, veio %d (%s)", stMod, bodyMod)
+	}
+	var errRespMod map[string]string
+	if err := json.Unmarshal(bodyMod, &errRespMod); err != nil || errRespMod["mensagem"] != msgEsperada {
+		t.Fatalf("testar modelo esperava mensagem %q, veio %s", msgEsperada, bodyMod)
+	}
+	if strings.Contains(string(bodyMod), segredoBruto) || strings.Contains(string(bodyMod), chaveAPITeste) {
+		t.Fatalf("resposta do teste de modelo vazou corpo bruto ou chave: %s", bodyMod)
+	}
+
+	// J3 + J2: atividade configurada apenas com principal (sem reserva) fica pronta e, ao falhar, devolve o erro do principal com 1 tentativa.
+	var rota RotaAtividade
+	if st := c.pedir("PUT", "/api/admin/atividades/imagem", map[string]any{
+		"modeloPrincipalId": modImg.ID, "modeloReservaId": nil,
+	}, &rota); st != 200 || !rota.Pronta || len(rota.Falta) != 0 {
+		t.Fatalf("PUT imagem sem reserva esperava pronta=true, veio %d %+v", st, rota)
+	}
+	stAtv, bodyAtv := c.pedirComCorpo("POST", "/api/admin/atividades/imagem/testar", nil)
+	if stAtv != 502 {
+		t.Fatalf("testar atividade 400 esperava 502, veio %d (%s)", stAtv, bodyAtv)
+	}
+	var errRespAtv map[string]string
+	if err := json.Unmarshal(bodyAtv, &errRespAtv); err != nil || errRespAtv["codigo"] != "atividade_falhou" || errRespAtv["mensagem"] != msgEsperada {
+		t.Fatalf("testar atividade esperava atividade_falhou com %q, veio %s", msgEsperada, bodyAtv)
+	}
+	if strings.Contains(string(bodyAtv), segredoBruto) || strings.Contains(string(bodyAtv), chaveAPITeste) {
+		t.Fatalf("resposta do teste de atividade vazou corpo bruto ou chave: %s", bodyAtv)
+	}
+
+	// Confere que ia_execucoes gravou exatamente 2 registros (1 do teste do modelo + 1 tentativa do teste da atividade).
+	var execs RespostaExecucoes
+	if st := c.pedir("GET", "/api/admin/execucoes?limite=10", nil, &execs); st != 200 || len(execs.Execucoes) != 2 {
+		t.Fatalf("esperava 2 execuções registradas, veio %d (%+v)", st, execs.Execucoes)
+	}
+	for _, ex := range execs.Execucoes {
+		if ex.Status != "falha" || ex.Erro == nil || *ex.Erro != msgEsperada {
+			t.Fatalf("execução gravada inesperada: %+v", ex)
+		}
+	}
+
+	// J3: caminho de sucesso e limite em atividade sem reserva usando simulado.
+	_, modTxt, _, _, _, _ := prepararSimuladosCompletos(t, c)
+	if st := c.pedir("PUT", "/api/admin/atividades/texto", map[string]any{
+		"modeloPrincipalId": modTxt, "modeloReservaId": nil,
+	}, &rota); st != 200 || !rota.Pronta {
+		t.Fatalf("PUT texto sem reserva falhou: %d %+v", st, rota)
+	}
+	resOk, stExec, _, _ := api.executarAtividade(context.Background(), "texto", "", "", "Oi")
+	if stExec != 0 || resOk.AtendidoPelaReserva || len(resOk.Tentativas) != 1 || resOk.Tentativas[0].Status != "ok" {
+		t.Fatalf("executarAtividade sem reserva esperava sucesso com 1 tentativa, veio st=%d %+v", stExec, resOk)
+	}
+	if st := c.pedir("PATCH", "/api/admin/modelos/"+modTxt, map[string]any{"limiteMensalUsd": 0.01}, nil); st != 200 {
+		t.Fatalf("PATCH limite falhou: %d", st)
+	}
+	if stLim, bodyLim := c.pedirComCorpo("POST", "/api/admin/atividades/texto/testar", nil); stLim != 409 ||
+		!strings.Contains(string(bodyLim), "limite_atingido") || !strings.Contains(string(bodyLim), "modelo principal") {
+		t.Fatalf("principal sem reserva no limite esperava 409 limite_atingido, veio %d (%s)", stLim, bodyLim)
 	}
 }

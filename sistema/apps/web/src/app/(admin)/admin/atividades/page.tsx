@@ -138,7 +138,7 @@ export default function PaginaAtividades() {
       <div className="page-header" style={{ marginBottom: 0 }}>
         <div>
           <h1>Atividades de IA</h1>
-          <p>Escolha o modelo principal e o modelo reserva de cada atividade da plataforma.</p>
+          <p>Escolha o modelo principal e o modelo reserva (opcional) de cada atividade da plataforma.</p>
         </div>
       </div>
 
@@ -270,7 +270,7 @@ export default function PaginaAtividades() {
                 <tr>
                   <th>Atividade</th>
                   <th>Principal</th>
-                  <th>Reserva</th>
+                  <th>Reserva (opcional)</th>
                   <th>Situação</th>
                   <th>Ações</th>
                 </tr>
@@ -332,7 +332,7 @@ export default function PaginaAtividades() {
                           disabled={modelosCarregando}
                           onChange={(e) => mudarSelecao(r.atividade, "reserva", e.target.value, r)}
                         >
-                          <option value="">Selecione…</option>
+                          <option value="">Nenhum (opcional)</option>
                           {reservaInativa && (
                             <option value={reservaInativa.id} disabled>
                               {reservaInativa.fornecedorNome} — {reservaInativa.identificador} (inativo)

@@ -268,6 +268,20 @@ export function useEditarFornecedor() {
   });
 }
 
+export function useExcluirFornecedor() {
+  const qc = useQueryClient();
+  return useMutation({
+    gcTime: 0,
+    mutationFn: (id: string) =>
+      chamar("DELETE", `/api/admin/fornecedores/${encodeURIComponent(id)}`, null),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "fornecedores"] });
+      qc.invalidateQueries({ queryKey: ["admin", "avisos"] });
+      qc.invalidateQueries({ queryKey: ["admin", "atividades"] });
+    },
+  });
+}
+
 export function useLerModelos(fornecedorId: string) {
   return useMutation({
     mutationFn: () =>
@@ -344,11 +358,51 @@ export function useCriarPreco(modeloId: string, fornecedorId: string) {
   });
 }
 
+async function recuperarErroExecucaoRecente(
+  inicioMs: number,
+  filtro: { atividade: string; modeloIdentificador?: string },
+): Promise<string | null> {
+  try {
+    const resp = await chamar("GET", "/api/admin/execucoes?limite=5", RespostaExecucoes);
+    const achado = resp.execucoes.find((ex) => {
+      if (!ex.erro || ex.status === "ok" || ex.atividade !== filtro.atividade) return false;
+      if (filtro.modeloIdentificador && ex.modeloIdentificador !== filtro.modeloIdentificador) return false;
+      const criadoMs = Date.parse(ex.criadoEm);
+      return Number.isFinite(criadoMs) && criadoMs >= inicioMs - 5000;
+    });
+    return achado?.erro ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function useTestarModelo(fornecedorId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (modeloId: string) =>
-      chamar("POST", `/api/admin/modelos/${encodeURIComponent(modeloId)}/testar`, ResultadoTeste),
+    mutationFn: async (modeloId: string) => {
+      const inicio = Date.now();
+      try {
+        return await chamar("POST", `/api/admin/modelos/${encodeURIComponent(modeloId)}/testar`, ResultadoTeste);
+      } catch (e) {
+        if (e instanceof FalhaApi && e.codigo === "falha" && e.status >= 500) {
+          const modelosCache = qc.getQueryData<z.infer<typeof RespostaModelos>>([
+            "admin",
+            "fornecedores",
+            fornecedorId,
+            "modelos",
+          ]);
+          const modelo = modelosCache?.modelos.find((m) => m.id === modeloId);
+          const erroSalvo = await recuperarErroExecucaoRecente(inicio, {
+            atividade: "teste",
+            modeloIdentificador: modelo?.identificador,
+          });
+          if (erroSalvo) {
+            throw new FalhaApi(e.status, "fornecedor_erro", erroSalvo);
+          }
+        }
+        throw e;
+      }
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["admin", "avisos"] });
       qc.invalidateQueries({ queryKey: ["admin", "fornecedores"] });
@@ -380,8 +434,20 @@ export function useSalvarAtividade() {
 export function useTestarAtividade() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (atividade: Atividade) =>
-      chamar("POST", `/api/admin/atividades/${encodeURIComponent(atividade)}/testar`, ResultadoAtividade),
+    mutationFn: async (atividade: Atividade) => {
+      const inicio = Date.now();
+      try {
+        return await chamar("POST", `/api/admin/atividades/${encodeURIComponent(atividade)}/testar`, ResultadoAtividade);
+      } catch (e) {
+        if (e instanceof FalhaApi && e.codigo === "falha" && e.status >= 500) {
+          const erroSalvo = await recuperarErroExecucaoRecente(inicio, { atividade });
+          if (erroSalvo) {
+            throw new FalhaApi(e.status, "atividade_falhou", erroSalvo);
+          }
+        }
+        throw e;
+      }
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["admin", "avisos"] });
       qc.invalidateQueries({ queryKey: ["admin", "fornecedores"] });

@@ -533,13 +533,16 @@ func (a *API) executarAtividadeInterna(ctx context.Context, atividade, orgID, us
 	tentativas := make([]Tentativa, 0, 2)
 	todosPuladoLimite := true
 
-	pares := []struct {
+	type parExecucao struct {
 		id      string
 		reserva bool
 		numero  int
-	}{
+	}
+	pares := []parExecucao{
 		{id: rota.Principal.ID, reserva: false, numero: 1},
-		{id: rota.Reserva.ID, reserva: true, numero: 2},
+	}
+	if rota.Reserva != nil {
+		pares = append(pares, parExecucao{id: rota.Reserva.ID, reserva: true, numero: 2})
 	}
 
 	for _, par := range pares {
@@ -627,9 +630,34 @@ func (a *API) executarAtividadeInterna(ctx context.Context, atividade, orgID, us
 	}
 
 	if todosPuladoLimite {
-		return ResultadoAtividade{}, 409, "limite_atingido", "Limite mensal atingido no modelo principal e no modelo reserva."
+		msgLimite := "Limite mensal atingido no modelo principal."
+		if rota.Reserva != nil {
+			msgLimite = "Limite mensal atingido no modelo principal e no modelo reserva."
+		}
+		return ResultadoAtividade{}, 409, "limite_atingido", msgLimite
 	}
-	return ResultadoAtividade{}, 502, "atividade_falhou", "Não foi possível concluir a atividade pelos modelos configurados."
+	return ResultadoAtividade{}, 502, "atividade_falhou", resumirErroTentativas(tentativas)
+}
+
+func resumirErroTentativas(tentativas []Tentativa) string {
+	if len(tentativas) == 1 && tentativas[0].Erro != nil {
+		return *tentativas[0].Erro
+	}
+	partes := make([]string, 0, len(tentativas))
+	for i, t := range tentativas {
+		if t.Erro == nil {
+			continue
+		}
+		papel := "Principal"
+		if i > 0 {
+			papel = "Reserva"
+		}
+		partes = append(partes, fmt.Sprintf("%s (%s): %s", papel, t.Modelo.Identificador, *t.Erro))
+	}
+	if len(partes) == 0 {
+		return "Não foi possível concluir a atividade pelos modelos configurados."
+	}
+	return strings.Join(partes, " ")
 }
 
 type executorSQL interface {
@@ -947,7 +975,9 @@ func (a *API) carregarRotaAtividade(ctx context.Context, def definicaoAtividade)
 
 func (a *API) avaliarModeloRota(ctx context.Context, id *string, papel, servico, hoje string, falta *[]string) (*ModeloResumo, error) {
 	if id == nil {
-		*falta = append(*falta, "modelo "+papel)
+		if papel == "principal" {
+			*falta = append(*falta, "modelo "+papel)
+		}
 		return nil, nil
 	}
 	cand, err := a.buscarCandidato(ctx, *id)

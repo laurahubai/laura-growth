@@ -113,7 +113,7 @@ export const PedidoNovoFornecedor = z.object({
 export type PedidoNovoFornecedor = z.infer<typeof PedidoNovoFornecedor>;
 
 // PATCH /api/admin/fornecedores/{id} -> 200 Fornecedor. Campos ausentes não mudam.
-// chave: troca a chave (mínimo de 12 caracteres ASCII visíveis, máx. 500). ativo=false desativa (nada é apagado). O tipo não muda.
+// chave: troca a chave (mínimo de 12 caracteres ASCII visíveis, máx. 500). ativo=false desativa. O tipo não muda.
 // Erros: 400 dados_invalidos | formato_invalido | endereco_invalido; 404 nao_encontrado; 409 nome_repetido.
 export const PedidoEditarFornecedor = z.object({
   nome: z.string().trim().min(1).max(100).optional(),
@@ -125,6 +125,9 @@ export const PedidoEditarFornecedor = z.object({
   ativo: z.boolean().optional(),
 });
 export type PedidoEditarFornecedor = z.infer<typeof PedidoEditarFornecedor>;
+
+// DELETE /api/admin/fornecedores/{id} -> 204 (exclui fornecedor, modelos e preços; preserva ia_execucoes).
+// Erros: 404 nao_encontrado; 409 fornecedor_em_uso (atividade usa modelo deste fornecedor).
 
 // POST /api/admin/fornecedores/{id}/ler-modelos (sem corpo) -> 200
 // Erros com mensagem clara e sem a chave: 502 fornecedor_recusou_chave | fornecedor_indisponivel |
@@ -265,7 +268,7 @@ export const RotaAtividade = z.object({
   principal: ModeloResumo.nullable(),
   reserva: ModeloResumo.nullable(),
   pronta: z.boolean(),
-  falta: z.array(z.string()), // ex.: ["modelo principal", "modelo reserva", "preço do modelo reserva"]
+  falta: z.array(z.string()), // ex.: ["modelo principal"] (reserva é opcional)
 });
 export type RotaAtividade = z.infer<typeof RotaAtividade>;
 
