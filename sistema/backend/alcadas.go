@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -241,6 +242,10 @@ type escritorSQL interface {
 }
 
 func registrarAcesso(ctx context.Context, exec escritorSQL, orgID *string, atorID string, alvoUsuarioID *string, alvoEmail *string, acao string, detalhe any) error {
+	return registrarAcessoEm(ctx, exec, orgID, &atorID, alvoUsuarioID, alvoEmail, acao, detalhe, time.Now())
+}
+
+func registrarAcessoEm(ctx context.Context, exec escritorSQL, orgID, atorID, alvoUsuarioID, alvoEmail *string, acao string, detalhe any, em time.Time) error {
 	detalheJSON := []byte("{}")
 	if detalhe != nil {
 		b, err := json.Marshal(detalhe)
@@ -250,8 +255,8 @@ func registrarAcesso(ctx context.Context, exec escritorSQL, orgID *string, atorI
 		detalheJSON = b
 	}
 	_, err := exec.Exec(ctx, `
-		INSERT INTO registro_acessos (organizacao_id, ator_id, alvo_usuario_id, alvo_email, acao, detalhe)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb)`,
-		orgID, atorID, alvoUsuarioID, alvoEmail, acao, string(detalheJSON))
+		INSERT INTO registro_acessos (organizacao_id, ator_id, alvo_usuario_id, alvo_email, acao, detalhe, em)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7)`,
+		orgID, atorID, alvoUsuarioID, alvoEmail, acao, string(detalheJSON), em)
 	return err
 }

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -29,18 +30,22 @@ type API struct {
 	limite              *limitador
 	agora               func() time.Time
 	resolverIP          resolvedorIP
+	email               enviadorEmail
+	enderecoPublico     string
 	permitirRedeInterna bool        // usado apenas em testes locais com httptest.NewTLSServer
 	tlsTeste            *tls.Config // usado apenas em testes locais com httptest.NewTLSServer
 }
 
 func NovaAPI(banco *Banco, cookieSeguro bool, cifrador *Cifrador) *API {
 	return &API{
-		banco:        banco,
-		cookieSeguro: cookieSeguro,
-		cifrador:     cifrador,
-		limite:       novoLimitador(),
-		agora:        time.Now,
-		resolverIP:   resolverDNS,
+		banco:           banco,
+		cookieSeguro:    cookieSeguro,
+		cifrador:        cifrador,
+		limite:          novoLimitador(),
+		agora:           time.Now,
+		resolverIP:      resolverDNS,
+		email:           novoEnviadorEmailZoho(os.Getenv("LG_EMAIL_ZOHO_URL"), os.Getenv("LG_EMAIL_ZOHO_CHAVE")),
+		enderecoPublico: strings.TrimSpace(os.Getenv("LG_ENDERECO_PUBLICO")),
 	}
 }
 
@@ -85,6 +90,7 @@ func (a *API) Rotas() http.Handler {
 	m.HandleFunc("GET /api/organizacao", a.comSessao(a.verOrganizacao))
 	a.rotasKit(m)
 	a.rotasPessoas(m)
+	a.rotasConvites(m)
 	a.rotasAdmin(m)
 	return protegerOrigem(m)
 }
@@ -123,39 +129,50 @@ type contextoSessao struct {
 
 type manipulador func(w http.ResponseWriter, r *http.Request, s contextoSessao)
 
+func (a *API) lerSessaoDeCookie(r *http.Request) (s contextoSessao, tinhaCookie bool, valido bool, err error) {
+	c, errCookie := r.Cookie(nomeCookie)
+	if errCookie != nil || c.Value == "" {
+		return s, false, false, nil
+	}
+	token, errDec := base64.RawURLEncoding.DecodeString(c.Value)
+	if errDec != nil || len(token) != 32 {
+		return s, true, false, nil
+	}
+	hash := sha256.Sum256(token)
+	var org *string
+	err = a.banco.QueryRow(r.Context(), `
+		SELECT u.id::text, u.nome, u.email, s.organizacao_id::text
+		FROM sessoes s JOIN usuarios u ON u.id = s.usuario_id
+		WHERE s.token_hash = $1 AND s.expira_em > $2`, hash[:], a.agora()).
+		Scan(&s.usuario.ID, &s.usuario.Nome, &s.usuario.Email, &org)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return s, true, false, nil
+	}
+	if err != nil {
+		return s, true, false, err
+	}
+	s.tokenHash = hash[:]
+	if org != nil {
+		s.orgAtiva = *org
+	}
+	return s, true, true, nil
+}
+
 func (a *API) comSessao(h manipulador) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie(nomeCookie)
-		if err != nil || c.Value == "" {
-			erro(w, 401, "sem_sessao", "Entre com seu e-mail e senha.")
-			return
-		}
-		token, err := base64.RawURLEncoding.DecodeString(c.Value)
-		if err != nil || len(token) != 32 {
-			a.apagarCookie(w)
-			erro(w, 401, "sem_sessao", "Entre com seu e-mail e senha.")
-			return
-		}
-		hash := sha256.Sum256(token)
-		var s contextoSessao
-		var org *string
-		err = a.banco.QueryRow(r.Context(), `
-			SELECT u.id::text, u.nome, u.email, s.organizacao_id::text
-			FROM sessoes s JOIN usuarios u ON u.id = s.usuario_id
-			WHERE s.token_hash = $1 AND s.expira_em > $2`, hash[:], a.agora()).
-			Scan(&s.usuario.ID, &s.usuario.Nome, &s.usuario.Email, &org)
-		if errors.Is(err, pgx.ErrNoRows) {
-			a.apagarCookie(w)
-			erro(w, 401, "sem_sessao", "Sua sessão terminou. Entre de novo.")
-			return
-		}
+		s, tinhaCookie, valido, err := a.lerSessaoDeCookie(r)
 		if err != nil {
 			falhaInterna(w, err)
 			return
 		}
-		s.tokenHash = hash[:]
-		if org != nil {
-			s.orgAtiva = *org
+		if !valido {
+			if tinhaCookie {
+				a.apagarCookie(w)
+				erro(w, 401, "sem_sessao", "Sua sessão terminou. Entre de novo.")
+			} else {
+				erro(w, 401, "sem_sessao", "Entre com seu e-mail e senha.")
+			}
+			return
 		}
 		h(w, r, s)
 	}
