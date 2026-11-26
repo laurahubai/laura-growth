@@ -18,6 +18,7 @@ export default function PaginaPessoasOrganizacaoAdmin() {
     <GerenciarPessoas
       orgId={orgId}
       orgNome={org?.nome}
+      escopo="admin"
       baseApi={`/api/admin/organizacoes/${encodeURIComponent(orgId)}`}
       erroSemPermissaoComoSemAcesso={false}
       linkVoltar={{ href: "/admin/organizacoes", rotulo: "Voltar para organizações" }}

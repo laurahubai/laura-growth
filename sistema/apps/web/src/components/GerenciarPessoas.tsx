@@ -26,12 +26,14 @@ import {
   useRemoverPessoa,
   useSalvarAlcadasPessoa,
   useSessao,
+  type EscopoPessoas,
 } from "@/lib/api";
 import { etiquetaEnvioConvite, formatarDataHora } from "@/lib/formato";
 
 export type PropsGerenciarPessoas = {
   orgId: string;
   orgNome?: string;
+  escopo: EscopoPessoas;
   baseApi?: string;
   erroSemPermissaoComoSemAcesso?: boolean;
   linkVoltar?: { href: string; rotulo: string };
@@ -40,17 +42,18 @@ export type PropsGerenciarPessoas = {
 export function GerenciarPessoas({
   orgId,
   orgNome,
+  escopo,
   baseApi = "/api",
   erroSemPermissaoComoSemAcesso = true,
   linkVoltar,
 }: PropsGerenciarPessoas) {
   const { data: sessao } = useSessao();
-  const pessoas = usePessoas(orgId, baseApi);
-  const registro = useRegistroAcessos(orgId, 100, baseApi);
-  const criarConvite = useCriarConvite(orgId, baseApi);
-  const reenviarConvite = useReenviarConvite(orgId, baseApi);
-  const cancelarConvite = useCancelarConvite(orgId, baseApi);
-  const removerPessoa = useRemoverPessoa(orgId, baseApi);
+  const pessoas = usePessoas(orgId, baseApi, escopo);
+  const registro = useRegistroAcessos(orgId, 100, baseApi, escopo);
+  const criarConvite = useCriarConvite(orgId, baseApi, escopo);
+  const reenviarConvite = useReenviarConvite(orgId, baseApi, escopo);
+  const cancelarConvite = useCancelarConvite(orgId, baseApi, escopo);
+  const removerPessoa = useRemoverPessoa(orgId, baseApi, escopo);
 
   const [editando, setEditando] = useState<PessoaMembro | null>(null);
   const gatilhoEdicaoRef = useRef<HTMLElement | null>(null);
@@ -516,6 +519,7 @@ export function GerenciarPessoas({
       {editando && (
         <GavetaEditarAlcadas
           orgId={orgId}
+          escopo={escopo}
           baseApi={baseApi}
           pessoa={editando}
           conjuntos={dados.conjuntos}
@@ -528,18 +532,20 @@ export function GerenciarPessoas({
 
 function GavetaEditarAlcadas({
   orgId,
+  escopo,
   baseApi,
   pessoa,
   conjuntos,
   aoFechar,
 }: {
   orgId: string;
+  escopo: EscopoPessoas;
   baseApi: string;
   pessoa: PessoaMembro;
   conjuntos: ConjuntoAlcadas[];
   aoFechar: () => void;
 }) {
-  const salvar = useSalvarAlcadasPessoa(orgId, baseApi);
+  const salvar = useSalvarAlcadasPessoa(orgId, baseApi, escopo);
   const [alcadas, setAlcadas] = useState<Alcada[]>(pessoa.alcadas);
   const dialogRef = useRef<HTMLDivElement>(null);
 

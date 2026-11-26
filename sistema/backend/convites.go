@@ -572,6 +572,26 @@ func (a *API) revogarConviteCom(w http.ResponseWriter, r *http.Request, s contex
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// S-1: o convite só é válido enquanto quem o criou continuar administrador da plataforma,
+// dono ou membro com gerenciar_pessoas na organização.
+func criadorConviteAutorizado(ctx context.Context, q executorSQL, orgID string, criadoPor *string) (bool, error) {
+	if criadoPor == nil {
+		return false, nil
+	}
+	var ehAdminCriador bool
+	err := q.QueryRow(ctx, `SELECT admin_plataforma FROM usuarios WHERE id = $1::uuid`, *criadoPor).Scan(&ehAdminCriador)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if ehAdminCriador {
+		return true, nil
+	}
+	return exigirAlcadaCom(ctx, q, orgID, *criadoPor, "gerenciar_pessoas", false)
+}
+
 func (a *API) verConvitePublico(w http.ResponseWriter, r *http.Request) {
 	tokenHash, ok := hashTokenConvite(r.PathValue("token"))
 	if !ok {
@@ -579,37 +599,35 @@ func (a *API) verConvitePublico(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var orgNome, email string
+	var orgID, orgNome, email string
+	var criadoPor *string
 	var contaExistente bool
 	err := a.banco.QueryRow(r.Context(), `
-		SELECT o.nome, c.email,
+		SELECT c.organizacao_id::text, o.nome, c.email, c.criado_por::text,
 		       EXISTS (SELECT 1 FROM usuarios u WHERE lower(u.email) = lower(c.email))
 		FROM convites c
 		JOIN organizacoes o ON o.id = c.organizacao_id
-		LEFT JOIN usuarios cu ON cu.id = c.criado_por
-		LEFT JOIN membros cm ON cm.organizacao_id = c.organizacao_id AND cm.usuario_id = c.criado_por
 		WHERE c.token_hash = $1
 		  AND c.aceito_em IS NULL
 		  AND c.revogado_em IS NULL
-		  AND c.expira_em > $2
-		  AND (
-		    COALESCE(cu.admin_plataforma, false) = true
-		    OR cm.papel = 'dono'
-		    OR EXISTS (
-		      SELECT 1 FROM alcadas_membro cam
-		      WHERE cam.organizacao_id = cm.organizacao_id
-		        AND cam.usuario_id = cm.usuario_id
-		        AND cam.alcada = 'gerenciar_pessoas'
-		    )
-		  )`,
+		  AND c.expira_em > $2`,
 		tokenHash, a.agora()).
-		Scan(&orgNome, &email, &contaExistente)
+		Scan(&orgID, &orgNome, &email, &criadoPor, &contaExistente)
 	if errors.Is(err, pgx.ErrNoRows) {
 		erro(w, 404, "convite_invalido", "Este convite não é válido ou já expirou.")
 		return
 	}
 	if err != nil {
 		falhaInterna(w, err)
+		return
+	}
+	autorizado, err := criadorConviteAutorizado(r.Context(), a.banco, orgID, criadoPor)
+	if err != nil {
+		falhaInterna(w, err)
+		return
+	}
+	if !autorizado {
+		erro(w, 404, "convite_invalido", "Este convite não é válido ou já expirou.")
 		return
 	}
 
@@ -673,24 +691,10 @@ func (a *API) aceitarConvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// S-1: o convite só pode ser aceito enquanto quem o criou continuar administrador da plataforma,
-	// dono ou membro com gerenciar_pessoas.
-	criadorAutorizado := false
-	if criadoPor != nil {
-		var ehAdminCriador bool
-		if err := tx.QueryRow(r.Context(), `SELECT admin_plataforma FROM usuarios WHERE id = $1::uuid`, *criadoPor).Scan(&ehAdminCriador); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			falhaInterna(w, err)
-			return
-		}
-		if ehAdminCriador {
-			criadorAutorizado = true
-		} else {
-			criadorAutorizado, err = exigirAlcadaCom(r.Context(), tx, orgID, *criadoPor, "gerenciar_pessoas", false)
-			if err != nil {
-				falhaInterna(w, err)
-				return
-			}
-		}
+	criadorAutorizado, err := criadorConviteAutorizado(r.Context(), tx, orgID, criadoPor)
+	if err != nil {
+		falhaInterna(w, err)
+		return
 	}
 	if !criadorAutorizado {
 		erro(w, 404, "convite_invalido", "Este convite não é válido ou já expirou.")

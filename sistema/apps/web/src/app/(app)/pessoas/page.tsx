@@ -10,6 +10,7 @@ export default function PaginaPessoas() {
     <GerenciarPessoas
       orgId={sessao.organizacaoAtiva.id}
       orgNome={sessao.organizacaoAtiva.nome}
+      escopo="org"
     />
   );
 }

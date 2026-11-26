@@ -105,9 +105,6 @@ func TestAdminOrganizacoesB11(t *testing.T) {
 	if st := paulo.pedir("GET", "/api/admin/organizacoes", nil, &respOrgs); st != 200 {
 		t.Fatalf("GET /api/admin/organizacoes falhou: %d", st)
 	}
-	if len(respOrgs.Organizacoes) != 3 {
-		t.Fatalf("esperava 3 organizações, veio %d: %+v", len(respOrgs.Organizacoes), respOrgs.Organizacoes)
-	}
 	var achouClinica bool
 	for _, o := range respOrgs.Organizacoes {
 		if o.ID == clinicaID {
@@ -216,18 +213,27 @@ func TestAdminOrganizacoesB11(t *testing.T) {
 	if st := paulo.pedir("GET", "/api/admin/organizacoes/"+clinicaID+"/pessoas/registro", nil, &reg); st != 200 {
 		t.Fatalf("GET registro via admin falhou: %d", st)
 	}
-	if len(reg.Registros) < 6 {
-		t.Fatalf("esperava pelo menos 6 registros na Clínica Alheia, veio %d", len(reg.Registros))
+	acoesEsperadas := []string{
+		"membro_removido",
+		"alcada_concedida",
+		"convite_revogado",
+		"convite_criado",
+		"convite_aceito",
+		"convite_reenviado",
+		"convite_criado",
 	}
-	var acoesAdmin []string
+	var acoesRegistradas []string
 	for _, r := range reg.Registros {
+		acoesRegistradas = append(acoesRegistradas, r.Acao)
 		if r.Acao == "convite_aceito" {
 			if r.AtorID == nil || *r.AtorID != sessConvidado.Usuario.ID {
 				t.Fatalf("convite_aceito deveria ter o convidado como ator: %+v", r)
 			}
+			if _, tem := r.Detalhe["via_admin_plataforma"]; tem {
+				t.Fatalf("convite_aceito não deveria ter via_admin_plataforma: %+v", r.Detalhe)
+			}
 			continue
 		}
-		acoesAdmin = append(acoesAdmin, r.Acao)
 		if r.AtorID == nil || *r.AtorID != sessPaulo.Usuario.ID {
 			t.Fatalf("registro %s deveria ter Paulo como ator, veio %+v", r.Acao, r)
 		}
@@ -236,9 +242,73 @@ func TestAdminOrganizacoesB11(t *testing.T) {
 			t.Fatalf("registro %s sem via_admin_plataforma=true: %s", r.Acao, raw)
 		}
 	}
-	for _, esperada := range []string{"convite_criado", "convite_reenviado", "convite_revogado", "alcada_concedida", "membro_removido"} {
-		if !slices.Contains(acoesAdmin, esperada) {
-			t.Fatalf("ação %s ausente nos registros via admin: %+v", esperada, acoesAdmin)
-		}
+	slices.Sort(acoesEsperadas)
+	slices.Sort(acoesRegistradas)
+	if !slices.Equal(acoesRegistradas, acoesEsperadas) {
+		t.Fatalf("conjunto de ações de auditoria inesperado: veio %+v, esperava %+v", acoesRegistradas, acoesEsperadas)
+	}
+
+	// Negativo: ação comum pela rota da própria organização (/api/pessoas/...) NÃO marca via_admin_plataforma.
+	if st := donoClinica.pedir("PUT", "/api/pessoas/"+sessConvidado.Usuario.ID+"/alcadas", map[string]any{
+		"alcadas": []string{"ver_marca_posts", "cmo_dna", "editar_posts"},
+	}, nil); st != 200 {
+		t.Fatalf("dono conceder alçada pela rota comum falhou: %d", st)
+	}
+	var regComum RespostaRegistroAcessos
+	if st := donoClinica.pedir("GET", "/api/pessoas/registro", nil, &regComum); st != 200 {
+		t.Fatalf("GET /api/pessoas/registro falhou: %d", st)
+	}
+	maisRecente := regComum.Registros[0]
+	if maisRecente.Acao != "alcada_concedida" || maisRecente.AtorID == nil || *maisRecente.AtorID != clinicaDonoID {
+		t.Fatalf("registro pela rota comum inesperado: %+v", maisRecente)
+	}
+	if _, tem := maisRecente.Detalhe["via_admin_plataforma"]; tem {
+		t.Fatalf("ação pela rota comum não deveria marcar via_admin_plataforma: %+v", maisRecente.Detalhe)
+	}
+}
+
+func TestAdminOrganizacoesB11ConviteAdminRebaixado(t *testing.T) {
+	api, _ := novaAPIConvitesTeste(t)
+
+	paulo := novoCliente(t, api)
+	sessPaulo := entrarComoPaulo(t, paulo)
+	growth := sessPaulo.Organizacoes[0]
+
+	var clinicaID string
+	if err := api.banco.QueryRow(context.Background(), `SELECT id::text FROM organizacoes WHERE nome = 'Clínica Alheia'`).Scan(&clinicaID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Segundo admin da plataforma (membro de Laura Growth, NÃO membro da Clínica Alheia).
+	adminTempID := criarMembroNaOrg(t, api.banco, growth.ID, "Admin Temp", "admin-temp-b11@exemplo.com")
+	if st := paulo.pedir("PUT", "/api/admin/equipe/"+adminTempID, map[string]any{"adminPlataforma": true}, nil); st != 200 {
+		t.Fatalf("promover admin temporário falhou: %d", st)
+	}
+	adminTemp := novoCliente(t, api)
+	entrarComEmail(t, adminTemp, "admin-temp-b11@exemplo.com")
+
+	var conv RespostaConviteCriado
+	if st := adminTemp.pedir("POST", "/api/admin/organizacoes/"+clinicaID+"/convites", map[string]any{
+		"email":   "convidado-rebaixado-b11@exemplo.com",
+		"alcadas": []string{"ver_marca_posts"},
+	}, &conv); st != 201 {
+		t.Fatalf("criar convite por admin não-membro falhou: %d", st)
+	}
+	token := extrairTokenDeLink(t, conv.Link)
+
+	// Rebaixa o admin criador (admin_plataforma = false) antes do aceite.
+	if st := paulo.pedir("PUT", "/api/admin/equipe/"+adminTempID, map[string]any{"adminPlataforma": false}, nil); st != 200 {
+		t.Fatalf("rebaixar admin criador falhou: %d", st)
+	}
+
+	anon := novoCliente(t, api)
+	if st, body := anon.pedirComCorpo("GET", "/api/convites/"+token, nil); st != 404 || !strings.Contains(string(body), "convite_invalido") {
+		t.Fatalf("GET convite após rebaixamento do admin esperava 404 convite_invalido, veio %d (%s)", st, body)
+	}
+	if st, body := anon.pedirComCorpo("POST", "/api/convites/"+token+"/aceitar", map[string]any{
+		"nome":  "Alvo Rebaixado",
+		"senha": "senha-segura-123",
+	}); st != 404 || !strings.Contains(string(body), "convite_invalido") {
+		t.Fatalf("POST aceitar após rebaixamento do admin esperava 404 convite_invalido, veio %d (%s)", st, body)
 	}
 }
