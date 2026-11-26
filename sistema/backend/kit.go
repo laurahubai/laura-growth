@@ -73,11 +73,11 @@ var errSemOrganizacao = errors.New("sem organização ativa")
 
 // orgAtiva devolve a organização ativa da sessão, só se a pessoa ainda for membro dela.
 func (a *API) orgAtiva(ctx context.Context, s contextoSessao) (string, error) {
-	if s.orgAtiva == "" {
+	if !uuidValido(s.orgAtiva) || !uuidValido(s.usuario.ID) {
 		return "", errSemOrganizacao
 	}
 	var ok bool
-	err := a.banco.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM membros WHERE usuario_id = $1 AND organizacao_id::text = $2)`,
+	err := a.banco.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM membros WHERE usuario_id = $1::uuid AND organizacao_id = $2::uuid)`,
 		s.usuario.ID, s.orgAtiva).Scan(&ok)
 	if err != nil {
 		return "", err
@@ -334,27 +334,13 @@ func (a *API) enviarArquivo(w http.ResponseWriter, r *http.Request, s contextoSe
 }
 
 func (a *API) baixarArquivo(w http.ResponseWriter, r *http.Request, s contextoSessao) {
-	org, err := a.orgAtiva(r.Context(), s)
-	if errors.Is(err, errSemOrganizacao) {
-		erro(w, 404, "nao_encontrado", "Arquivo não encontrado.")
-		return
-	}
-	if err != nil {
-		falhaInterna(w, err)
-		return
-	}
-	permitido, err := a.exigirAlcada(r.Context(), org, s.usuario.ID, "ver_marca_posts")
-	if err != nil {
-		falhaInterna(w, err)
-		return
-	}
-	if !permitido {
-		erro(w, 403, "sem_permissao", "Você não tem permissão para acessar este recurso.")
+	org, ok := a.autorizarAlcada(w, r, s, "ver_marca_posts")
+	if !ok {
 		return
 	}
 	var nome, mime string
 	var conteudo []byte
-	err = a.banco.QueryRow(r.Context(), `
+	err := a.banco.QueryRow(r.Context(), `
 		SELECT nome, mime, conteudo FROM arquivos_marca WHERE id::text = $1 AND organizacao_id::text = $2`,
 		r.PathValue("id"), org).Scan(&nome, &mime, &conteudo)
 	if errors.Is(err, pgx.ErrNoRows) {

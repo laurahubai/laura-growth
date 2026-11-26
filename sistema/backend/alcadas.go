@@ -83,6 +83,25 @@ func copiarConjuntosProntos() []ConjuntoAlcadas {
 	return out
 }
 
+func uuidValido(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i := 0; i < 36; i++ {
+		c := s[i]
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+			continue
+		}
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
 // ordenarAlcadas devolve as alçadas únicas na ordem canônica definida em todasAlcadas.
 func ordenarAlcadas(entrada []string) []string {
 	presentes := make(map[string]bool, len(entrada))
@@ -119,12 +138,14 @@ func validarAlcadas(entrada []string) ([]string, bool) {
 // exigirAlcada verifica no banco, a cada pedido (sem cache), se o usuário possui a alçada
 // na organização informada. O papel 'dono' passa sempre.
 func (a *API) exigirAlcada(ctx context.Context, org, usuarioID, alcada string) (bool, error) {
-	if org == "" || usuarioID == "" || !alcadasValidas[alcada] {
+	return exigirAlcadaCom(ctx, a.banco, org, usuarioID, alcada, false)
+}
+
+func exigirAlcadaCom(ctx context.Context, q executorSQL, org, usuarioID, alcada string, travar bool) (bool, error) {
+	if !uuidValido(org) || !uuidValido(usuarioID) || !alcadasValidas[alcada] {
 		return false, nil
 	}
-	var papel string
-	var temAlcada bool
-	err := a.banco.QueryRow(ctx, `
+	consulta := `
 		SELECT m.papel,
 		       EXISTS (
 		         SELECT 1 FROM alcadas_membro am
@@ -133,8 +154,13 @@ func (a *API) exigirAlcada(ctx context.Context, org, usuarioID, alcada string) (
 		           AND am.alcada = $3
 		       )
 		FROM membros m
-		WHERE m.organizacao_id::text = $1 AND m.usuario_id::text = $2`,
-		org, usuarioID, alcada).Scan(&papel, &temAlcada)
+		WHERE m.organizacao_id = $1::uuid AND m.usuario_id = $2::uuid`
+	if travar {
+		consulta += ` FOR UPDATE OF m`
+	}
+	var papel string
+	var temAlcada bool
+	err := q.QueryRow(ctx, consulta, org, usuarioID, alcada).Scan(&papel, &temAlcada)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -175,12 +201,12 @@ func (a *API) autorizarAlcada(w http.ResponseWriter, r *http.Request, s contexto
 
 // alcadasDoUsuarioNaOrg lista as alçadas efetivas do usuário na organização (dono recebe todas as 8).
 func (a *API) alcadasDoUsuarioNaOrg(ctx context.Context, orgID, usuarioID string) ([]string, error) {
-	if orgID == "" || usuarioID == "" {
+	if !uuidValido(orgID) || !uuidValido(usuarioID) {
 		return []string{}, nil
 	}
 	var papel string
 	err := a.banco.QueryRow(ctx, `
-		SELECT papel FROM membros WHERE organizacao_id::text = $1 AND usuario_id::text = $2`,
+		SELECT papel FROM membros WHERE organizacao_id = $1::uuid AND usuario_id = $2::uuid`,
 		orgID, usuarioID).Scan(&papel)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return []string{}, nil
@@ -194,7 +220,7 @@ func (a *API) alcadasDoUsuarioNaOrg(ctx context.Context, orgID, usuarioID string
 		return out, nil
 	}
 	linhas, err := a.banco.Query(ctx, `
-		SELECT alcada FROM alcadas_membro WHERE organizacao_id::text = $1 AND usuario_id::text = $2`,
+		SELECT alcada FROM alcadas_membro WHERE organizacao_id = $1::uuid AND usuario_id = $2::uuid`,
 		orgID, usuarioID)
 	if err != nil {
 		return nil, err

@@ -2,6 +2,8 @@
 -- Migração apenas aditiva.
 --
 -- Como desfazer (somente após pg_dump do banco):
+--   DROP TRIGGER IF EXISTS registro_acessos_somente_insercao ON registro_acessos;
+--   DROP FUNCTION IF EXISTS impedir_alteracao_registro_acessos();
 --   DROP TABLE IF EXISTS registro_acessos;
 --   DROP TABLE IF EXISTS convites;
 --   DROP TABLE IF EXISTS alcadas_membro;
@@ -51,11 +53,12 @@ CREATE TABLE convites (
 CREATE INDEX convites_org_criado ON convites (organizacao_id, criado_em DESC);
 CREATE INDEX convites_org_email ON convites (organizacao_id, lower(email));
 
+-- Trilha imutável (append-only): sem cascatas de exclusão/alteração; gatilho impede UPDATE e DELETE.
 CREATE TABLE registro_acessos (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  organizacao_id   uuid REFERENCES organizacoes (id) ON DELETE CASCADE,
-  ator_id          uuid REFERENCES usuarios (id) ON DELETE SET NULL,
-  alvo_usuario_id  uuid REFERENCES usuarios (id) ON DELETE SET NULL,
+  organizacao_id   uuid,
+  ator_id          uuid,
+  alvo_usuario_id  uuid,
   alvo_email       text,
   acao             text NOT NULL,
   detalhe          jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -63,3 +66,13 @@ CREATE TABLE registro_acessos (
 );
 CREATE INDEX registro_acessos_org_em ON registro_acessos (organizacao_id, em DESC);
 CREATE INDEX registro_acessos_em ON registro_acessos (em DESC);
+
+CREATE OR REPLACE FUNCTION impedir_alteracao_registro_acessos() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'registro_acessos é somente inserção (append-only)';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER registro_acessos_somente_insercao
+  BEFORE UPDATE OR DELETE ON registro_acessos
+  FOR EACH ROW EXECUTE FUNCTION impedir_alteracao_registro_acessos();

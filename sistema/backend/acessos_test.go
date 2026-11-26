@@ -162,7 +162,7 @@ func TestAcessosB4Bloqueio403E404OutraOrg(t *testing.T) {
 	}
 
 	// Membro da Laura Growth sem alçadas: todas as rotas protegidas retornam 403 (mesmo com IDs forjados de outra org).
-	semAlcadaID := criarMembroNaOrg(t, api.banco, growth.ID, "Beto", "beto-b4@exemplo.com")
+	criarMembroNaOrg(t, api.banco, growth.ID, "Beto", "beto-b4@exemplo.com")
 	beto := novoCliente(t, api)
 	entrarComEmail(t, beto, "beto-b4@exemplo.com")
 
@@ -190,9 +190,7 @@ func TestAcessosB4Bloqueio403E404OutraOrg(t *testing.T) {
 	}
 
 	// Membro COM alçadas na Laura Growth tentando acessar recurso da Laura Hub (AC18) -> 404.
-	gestoraID := criarMembroNaOrg(t, api.banco, growth.ID, "Carla", "carla-b4@exemplo.com", "ver_marca_posts", "cmo_dna", "gerenciar_pessoas")
-	_ = semAlcadaID
-	_ = gestoraID
+	criarMembroNaOrg(t, api.banco, growth.ID, "Carla", "carla-b4@exemplo.com", "ver_marca_posts", "cmo_dna", "gerenciar_pessoas")
 	carla := novoCliente(t, api)
 	entrarComEmail(t, carla, "carla-b4@exemplo.com")
 
@@ -297,6 +295,12 @@ func TestAcessosB6RegistroAuditoriaERemocao(t *testing.T) {
 	if len(respPessoas.Membros) != 2 || len(respPessoas.Convites) != 1 || respPessoas.Convites[0].Email != "pendente@exemplo.com" {
 		t.Fatalf("GET /api/pessoas inesperado: %+v", respPessoas)
 	}
+	if respPessoas.Membros[0].Papel != "dono" || len(respPessoas.Membros[0].Alcadas) != 8 {
+		t.Fatalf("dono esperado primeiro com 8 alçadas em GET /api/pessoas: %+v", respPessoas.Membros[0])
+	}
+	if respPessoas.Membros[1].UsuarioID != eduardoID || respPessoas.Membros[1].Papel != "membro" || !slices.Equal(respPessoas.Membros[1].Alcadas, []string{"editar_posts", "aprovar_posts"}) {
+		t.Fatalf("membro esperado com alçadas exatas em GET /api/pessoas: %+v", respPessoas.Membros[1])
+	}
 
 	// 3. Remove Eduardo da Laura Growth.
 	eduardo := novoCliente(t, api)
@@ -328,6 +332,24 @@ func TestAcessosB6RegistroAuditoriaERemocao(t *testing.T) {
 	}
 	if reg.Registros[0].Acao != "membro_removido" {
 		t.Fatalf("registro mais recente esperava membro_removido, veio %+v", reg.Registros[0])
+	}
+
+	// Validação do parâmetro ?limite= em GET /api/pessoas/registro.
+	for _, invalido := range []string{"0", "201", "abc"} {
+		if st := paulo.pedir("GET", "/api/pessoas/registro?limite="+invalido, nil, nil); st != 400 {
+			t.Fatalf("limite=%s esperava 400, veio %d", invalido, st)
+		}
+	}
+	if st := paulo.pedir("GET", "/api/pessoas/registro?limite=2", nil, &reg); st != 200 || len(reg.Registros) != 2 {
+		t.Fatalf("limite=2 esperava 2 registros, veio %d (%d itens)", st, len(reg.Registros))
+	}
+
+	// Registro de acessos é somente inserção (append-only) no próprio banco.
+	if _, err := api.banco.Exec(context.Background(), `UPDATE registro_acessos SET acao = 'adulterado'`); err == nil {
+		t.Fatal("UPDATE em registro_acessos deveria falhar no banco")
+	}
+	if _, err := api.banco.Exec(context.Background(), `DELETE FROM registro_acessos`); err == nil {
+		t.Fatal("DELETE em registro_acessos deveria falhar no banco")
 	}
 
 	// Registro da Laura Hub está vazio (isolamento por organização).
@@ -485,6 +507,46 @@ func TestAcessosB8AdminEquipe(t *testing.T) {
 	var regOrg RespostaRegistroAcessos
 	if st := paulo.pedir("GET", "/api/pessoas/registro", nil, &regOrg); st != 200 || len(regOrg.Registros) != 0 {
 		t.Fatalf("registro da organização não deve incluir registros de plataforma: %d %+v", st, regOrg.Registros)
+	}
+
+	// G-1 / S-1: admin fora das organizações da casa aparece na lista e pode ser revogado,
+	// mas não pode voltar a receber admin sem entrar em uma organização da casa.
+	if st := gabi.pedir("PUT", "/api/admin/equipe/"+sessPaulo.Usuario.ID, map[string]any{"adminPlataforma": true}, &atualizado); st != 200 {
+		t.Fatalf("repromover Paulo falhou: %d", st)
+	}
+	if st := paulo.pedir("PUT", "/api/admin/equipe/"+membroCasaID, map[string]any{"adminPlataforma": true}, nil); st != 200 {
+		t.Fatalf("manter Gabi admin falhou: %d", st)
+	}
+	// Remove Gabi das duas organizações da casa (Laura Growth e Laura Hub), mantendo-a apenas com admin_plataforma=true.
+	if st := paulo.pedir("DELETE", "/api/pessoas/"+membroCasaID, nil, nil); st != 204 {
+		t.Fatalf("remover Gabi da Laura Growth falhou: %d", st)
+	}
+	if st := paulo.pedir("PUT", "/api/sessao/organizacao", map[string]string{"organizacaoId": hub.ID}, nil); st != 200 {
+		t.Fatal(st)
+	}
+	if st := paulo.pedir("DELETE", "/api/pessoas/"+membroCasaID, nil, nil); st != 204 {
+		t.Fatalf("remover Gabi da Laura Hub falhou: %d", st)
+	}
+	if st := paulo.pedir("GET", "/api/admin/equipe", nil, &resp); st != 200 {
+		t.Fatalf("GET /api/admin/equipe falhou: %d", st)
+	}
+	encontrouGabiSemCasa := false
+	for _, m := range resp.Equipe {
+		if m.UsuarioID == membroCasaID && m.AdminPlataforma && len(m.Organizacoes) == 0 {
+			encontrouGabiSemCasa = true
+		}
+	}
+	if !encontrouGabiSemCasa {
+		t.Fatalf("admin fora das orgs da casa deveria continuar visível em GET /api/admin/equipe: %+v", resp.Equipe)
+	}
+	if st := paulo.pedir("PUT", "/api/admin/equipe/"+membroCasaID, map[string]any{"adminPlataforma": false}, &atualizado); st != 200 || atualizado.AdminPlataforma {
+		t.Fatalf("revogar admin fora das orgs da casa esperava 200, veio %d %+v", st, atualizado)
+	}
+	if st := paulo.pedir("PUT", "/api/admin/equipe/"+membroCasaID, map[string]any{"adminPlataforma": true}, nil); st != 403 {
+		t.Fatalf("conceder admin a quem não está em org da casa esperava 403, veio %d", st)
+	}
+	if st := paulo.pedir("PUT", "/api/admin/equipe/id-invalido", map[string]any{"adminPlataforma": false}, nil); st != 404 {
+		t.Fatalf("id inválido em /api/admin/equipe esperava 404, veio %d", st)
 	}
 
 	// JSON marshaling sanity check (garante detalhe válido).

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -75,7 +76,7 @@ func (a *API) listarPessoas(w http.ResponseWriter, r *http.Request, s contextoSe
 		JOIN usuarios u ON u.id = m.usuario_id
 		LEFT JOIN alcadas_membro am
 		       ON am.organizacao_id = m.organizacao_id AND am.usuario_id = m.usuario_id
-		WHERE m.organizacao_id::text = $1
+		WHERE m.organizacao_id = $1::uuid
 		GROUP BY m.usuario_id, u.nome, u.email, m.papel, m.criado_em
 		ORDER BY (m.papel = 'dono') DESC, lower(u.nome), lower(u.email)`, org)
 	if err != nil {
@@ -108,7 +109,7 @@ func (a *API) listarPessoas(w http.ResponseWriter, r *http.Request, s contextoSe
 		SELECT c.id::text, c.email, c.alcadas, c.envio_estado, u.nome, c.criado_em, c.expira_em
 		FROM convites c
 		LEFT JOIN usuarios u ON u.id = c.criado_por
-		WHERE c.organizacao_id::text = $1
+		WHERE c.organizacao_id = $1::uuid
 		  AND c.aceito_em IS NULL
 		  AND c.revogado_em IS NULL
 		  AND c.expira_em > $2
@@ -141,6 +142,36 @@ func (a *API) listarPessoas(w http.ResponseWriter, r *http.Request, s contextoSe
 	})
 }
 
+// iniciarEscritaPessoas abre transação serializada por organização e revalida a alçada
+// dentro da própria transação (evita corrida entre revogação do ator e gravação).
+func (a *API) iniciarEscritaPessoas(w http.ResponseWriter, r *http.Request, s contextoSessao, org string) (pgx.Tx, bool) {
+	tx, err := a.banco.Begin(r.Context())
+	if err != nil {
+		falhaInterna(w, err)
+		return nil, false
+	}
+	if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtext('laura-growth:pessoas:' || $1))`, org); err != nil {
+		_ = tx.Rollback(r.Context())
+		falhaInterna(w, err)
+		return nil, false
+	}
+	permitido, err := exigirAlcadaCom(r.Context(), tx, org, s.usuario.ID, "gerenciar_pessoas", true)
+	if err != nil {
+		_ = tx.Rollback(r.Context())
+		falhaInterna(w, err)
+		return nil, false
+	}
+	if !permitido {
+		_ = tx.Rollback(r.Context())
+		slog.Warn("acesso recusado na transação por falta de alçada",
+			"usuarioId", s.usuario.ID, "organizacaoId", org, "alcada", "gerenciar_pessoas",
+			"metodo", r.Method, "rota", r.URL.Path)
+		erro(w, 403, "sem_permissao", "Você não tem permissão para realizar esta ação.")
+		return nil, false
+	}
+	return tx, true
+}
+
 func (a *API) salvarAlcadasPessoa(w http.ResponseWriter, r *http.Request, s contextoSessao) {
 	org, ok := a.autorizarAlcada(w, r, s, "gerenciar_pessoas")
 	if !ok {
@@ -167,21 +198,24 @@ func (a *API) salvarAlcadasPessoa(w http.ResponseWriter, r *http.Request, s cont
 		erro(w, 400, "alcada_invalida", "Há uma alçada inválida na lista.")
 		return
 	}
+	if !uuidValido(alvoID) {
+		erro(w, 404, "nao_encontrado", "Pessoa não encontrada nesta organização.")
+		return
+	}
 
-	tx, err := a.banco.Begin(r.Context())
-	if err != nil {
-		falhaInterna(w, err)
+	tx, ok := a.iniciarEscritaPessoas(w, r, s, org)
+	if !ok {
 		return
 	}
 	defer tx.Rollback(r.Context()) //nolint:errcheck
 
 	var papel, alvoNome, alvoEmail string
 	var criadoEm time.Time
-	err = tx.QueryRow(r.Context(), `
+	err := tx.QueryRow(r.Context(), `
 		SELECT m.papel, u.nome, u.email, m.criado_em
 		FROM membros m
 		JOIN usuarios u ON u.id = m.usuario_id
-		WHERE m.organizacao_id::text = $1 AND m.usuario_id::text = $2
+		WHERE m.organizacao_id = $1::uuid AND m.usuario_id = $2::uuid
 		FOR UPDATE OF m`, org, alvoID).
 		Scan(&papel, &alvoNome, &alvoEmail, &criadoEm)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -199,7 +233,7 @@ func (a *API) salvarAlcadasPessoa(w http.ResponseWriter, r *http.Request, s cont
 
 	linhasAtuais, err := tx.Query(r.Context(), `
 		SELECT alcada FROM alcadas_membro
-		WHERE organizacao_id::text = $1 AND usuario_id::text = $2`, org, alvoID)
+		WHERE organizacao_id = $1::uuid AND usuario_id = $2::uuid`, org, alvoID)
 	if err != nil {
 		falhaInterna(w, err)
 		return
@@ -229,7 +263,7 @@ func (a *API) salvarAlcadasPessoa(w http.ResponseWriter, r *http.Request, s cont
 		if estava && !fica {
 			if _, err := tx.Exec(r.Context(), `
 				DELETE FROM alcadas_membro
-				WHERE organizacao_id::text = $1 AND usuario_id::text = $2 AND alcada = $3`,
+				WHERE organizacao_id = $1::uuid AND usuario_id = $2::uuid AND alcada = $3`,
 				org, alvoID, al); err != nil {
 				falhaInterna(w, err)
 				return
@@ -279,20 +313,23 @@ func (a *API) removerPessoa(w http.ResponseWriter, r *http.Request, s contextoSe
 		erro(w, 403, "auto_remocao", "Você não pode remover a si mesmo da organização.")
 		return
 	}
+	if !uuidValido(alvoID) {
+		erro(w, 404, "nao_encontrado", "Pessoa não encontrada nesta organização.")
+		return
+	}
 
-	tx, err := a.banco.Begin(r.Context())
-	if err != nil {
-		falhaInterna(w, err)
+	tx, ok := a.iniciarEscritaPessoas(w, r, s, org)
+	if !ok {
 		return
 	}
 	defer tx.Rollback(r.Context()) //nolint:errcheck
 
 	var papel, alvoEmail string
-	err = tx.QueryRow(r.Context(), `
+	err := tx.QueryRow(r.Context(), `
 		SELECT m.papel, u.email
 		FROM membros m
 		JOIN usuarios u ON u.id = m.usuario_id
-		WHERE m.organizacao_id::text = $1 AND m.usuario_id::text = $2
+		WHERE m.organizacao_id = $1::uuid AND m.usuario_id = $2::uuid
 		FOR UPDATE OF m`, org, alvoID).
 		Scan(&papel, &alvoEmail)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -310,7 +347,7 @@ func (a *API) removerPessoa(w http.ResponseWriter, r *http.Request, s contextoSe
 
 	linhasAlcadas, err := tx.Query(r.Context(), `
 		SELECT alcada FROM alcadas_membro
-		WHERE organizacao_id::text = $1 AND usuario_id::text = $2`, org, alvoID)
+		WHERE organizacao_id = $1::uuid AND usuario_id = $2::uuid`, org, alvoID)
 	if err != nil {
 		falhaInterna(w, err)
 		return
@@ -326,14 +363,14 @@ func (a *API) removerPessoa(w http.ResponseWriter, r *http.Request, s contextoSe
 	}
 
 	if _, err := tx.Exec(r.Context(), `
-		DELETE FROM membros WHERE organizacao_id::text = $1 AND usuario_id::text = $2`,
+		DELETE FROM membros WHERE organizacao_id = $1::uuid AND usuario_id = $2::uuid`,
 		org, alvoID); err != nil {
 		falhaInterna(w, err)
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `
 		UPDATE sessoes SET organizacao_id = NULL
-		WHERE usuario_id::text = $1 AND organizacao_id::text = $2`,
+		WHERE usuario_id = $1::uuid AND organizacao_id = $2::uuid`,
 		alvoID, org); err != nil {
 		falhaInterna(w, err)
 		return
@@ -388,7 +425,7 @@ func (a *API) consultarRegistroAcessos(ctx context.Context, orgID *string, limit
 	`
 	if orgID != nil {
 		linhas, err = a.banco.Query(ctx, consultaBase+`
-			WHERE r.organizacao_id::text = $1
+			WHERE r.organizacao_id = $1::uuid
 			ORDER BY r.em DESC, r.id DESC
 			LIMIT $2`, *orgID, limite)
 	} else {
