@@ -174,3 +174,49 @@ export const PedidoAtualizarEquipeAdmin = z.object({
   adminPlataforma: z.boolean(),
 });
 export type PedidoAtualizarEquipeAdmin = z.infer<typeof PedidoAtualizarEquipeAdmin>;
+
+// ---------------------------------------------------------------------------
+// Convites (etapa 2B, fatia S2). Contrato fixado pelo condutor antes de S2/S3.
+// Erros: { codigo, mensagem } (ErroApi), mensagem pronta para a tela.
+// ---------------------------------------------------------------------------
+
+// POST /api/convites (gerenciar_pessoas)
+// Erros: 400 dados_invalidos; 403 sem_alcada; 409 ja_membro; 429 limite_convites_pendentes | limite_envios_hora.
+export const PedidoCriarConvite = z.object({
+  email: z.string().email(),
+  alcadas: z.array(Alcada),
+});
+export type PedidoCriarConvite = z.infer<typeof PedidoCriarConvite>;
+
+// Resposta de POST /api/convites (201) e de POST /api/convites/{id}/reenviar (200).
+// `link` vem só nesta resposta (para o botão "Copiar link"); nunca é listado depois.
+// `envioEstado` = "falhou" quando o e-mail não saiu (adaptador fora do ar ou não configurado);
+// `mensagemEnvio` traz o aviso claro para a tela nesse caso.
+export const RespostaConviteCriado = z.object({
+  convite: ConvitePendente,
+  link: z.string(),
+  mensagemEnvio: z.string().nullable(),
+});
+export type RespostaConviteCriado = z.infer<typeof RespostaConviteCriado>;
+
+// DELETE /api/convites/{id} -> 204 (gerenciar_pessoas). 404 nao_encontrado.
+
+// GET /api/convites/{token} (público, mínimo). 404 convite_invalido (inexistente, usado, expirado ou revogado).
+export const ConvitePublico = z.object({
+  organizacaoNome: z.string(),
+  emailMascarado: z.string(),
+  // true quando já existe conta com o e-mail convidado: a tela pede login em vez de cadastro.
+  contaExistente: z.boolean(),
+});
+export type ConvitePublico = z.infer<typeof ConvitePublico>;
+
+// POST /api/convites/{token}/aceitar (público).
+// Conta nova: corpo { nome, senha } -> cria a conta, inicia a sessão e entra na organização.
+// Conta existente: corpo {} e sessão ativa com o mesmo e-mail; sem sessão -> 401 login_necessario;
+// sessão de outro e-mail -> 403 email_diferente.
+// Sucesso: 200 com a Sessao atualizada (organização ativa = a do convite).
+export const PedidoAceitarConvite = z.object({
+  nome: z.string().min(1).optional(),
+  senha: z.string().min(1).optional(),
+});
+export type PedidoAceitarConvite = z.infer<typeof PedidoAceitarConvite>;
