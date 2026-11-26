@@ -88,32 +88,9 @@ func (a *API) orgAtiva(ctx context.Context, s contextoSessao) (string, error) {
 	return s.orgAtiva, nil
 }
 
-// orgParaGravar confere que a organização que a tela mostra ainda é a ativa.
-func (a *API) orgParaGravar(w http.ResponseWriter, r *http.Request, s contextoSessao, daTela string) (string, bool) {
-	org, err := a.orgAtiva(r.Context(), s)
-	if errors.Is(err, errSemOrganizacao) {
-		erro(w, 404, "sem_organizacao", "Nenhuma organização ativa.")
-		return "", false
-	}
-	if err != nil {
-		falhaInterna(w, err)
-		return "", false
-	}
-	if daTela != org {
-		erro(w, 409, "organizacao_trocada", "A organização ativa mudou. Recarregue a página antes de salvar.")
-		return "", false
-	}
-	return org, true
-}
-
 func (a *API) verKit(w http.ResponseWriter, r *http.Request, s contextoSessao) {
-	org, err := a.orgAtiva(r.Context(), s)
-	if errors.Is(err, errSemOrganizacao) {
-		erro(w, 404, "sem_organizacao", "Nenhuma organização ativa.")
-		return
-	}
-	if err != nil {
-		falhaInterna(w, err)
+	org, ok := a.autorizarAlcada(w, r, s, "ver_marca_posts")
+	if !ok {
 		return
 	}
 	resp, err := a.carregarKit(r.Context(), org)
@@ -218,12 +195,16 @@ func validarKit(k *KitMarca) string {
 }
 
 func (a *API) salvarKit(w http.ResponseWriter, r *http.Request, s contextoSessao) {
+	org, ok := a.autorizarAlcada(w, r, s, "cmo_dna")
+	if !ok {
+		return
+	}
 	var k KitMarca
 	if !lerJSON(w, r, &k) {
 		return
 	}
-	org, ok := a.orgParaGravar(w, r, s, k.OrganizacaoID)
-	if !ok {
+	if k.OrganizacaoID != org {
+		erro(w, 409, "organizacao_trocada", "A organização ativa mudou. Recarregue a página antes de salvar.")
 		return
 	}
 	if msg := validarKit(&k); msg != "" {
@@ -257,13 +238,17 @@ var mimesAceitos = map[string]map[string]bool{
 }
 
 func (a *API) enviarArquivo(w http.ResponseWriter, r *http.Request, s contextoSessao) {
+	org, ok := a.autorizarAlcada(w, r, s, "cmo_dna")
+	if !ok {
+		return
+	}
 	tipo := r.URL.Query().Get("tipo")
 	if mimesAceitos[tipo] == nil {
 		erro(w, 400, "tipo_invalido", "Tipo de arquivo inválido.")
 		return
 	}
-	org, ok := a.orgParaGravar(w, r, s, r.URL.Query().Get("organizacaoId"))
-	if !ok {
+	if r.URL.Query().Get("organizacaoId") != org {
+		erro(w, 409, "organizacao_trocada", "A organização ativa mudou. Recarregue a página antes de salvar.")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxTamanhoArquivo+64<<10)
@@ -358,6 +343,15 @@ func (a *API) baixarArquivo(w http.ResponseWriter, r *http.Request, s contextoSe
 		falhaInterna(w, err)
 		return
 	}
+	permitido, err := a.exigirAlcada(r.Context(), org, s.usuario.ID, "ver_marca_posts")
+	if err != nil {
+		falhaInterna(w, err)
+		return
+	}
+	if !permitido {
+		erro(w, 403, "sem_permissao", "Você não tem permissão para acessar este recurso.")
+		return
+	}
 	var nome, mime string
 	var conteudo []byte
 	err = a.banco.QueryRow(r.Context(), `
@@ -385,8 +379,12 @@ func (a *API) baixarArquivo(w http.ResponseWriter, r *http.Request, s contextoSe
 }
 
 func (a *API) removerArquivo(w http.ResponseWriter, r *http.Request, s contextoSessao) {
-	org, ok := a.orgParaGravar(w, r, s, r.URL.Query().Get("organizacaoId"))
+	org, ok := a.autorizarAlcada(w, r, s, "cmo_dna")
 	if !ok {
+		return
+	}
+	if r.URL.Query().Get("organizacaoId") != org {
+		erro(w, 409, "organizacao_trocada", "A organização ativa mudou. Recarregue a página antes de salvar.")
 		return
 	}
 	tag, err := a.banco.Exec(r.Context(), `DELETE FROM arquivos_marca WHERE id::text = $1 AND organizacao_id::text = $2`, r.PathValue("id"), org)

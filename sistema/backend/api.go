@@ -63,6 +63,7 @@ type Sessao struct {
 	Usuario          Usuario       `json:"usuario"`
 	Organizacoes     []Organizacao `json:"organizacoes"`
 	OrganizacaoAtiva Organizacao   `json:"organizacaoAtiva"`
+	Alcadas          []string      `json:"alcadas"`
 }
 
 type OrganizacaoDetalhe struct {
@@ -83,6 +84,7 @@ func (a *API) Rotas() http.Handler {
 	m.HandleFunc("PUT /api/sessao/organizacao", a.comSessao(a.trocarOrganizacao))
 	m.HandleFunc("GET /api/organizacao", a.comSessao(a.verOrganizacao))
 	a.rotasKit(m)
+	a.rotasPessoas(m)
 	a.rotasAdmin(m)
 	return protegerOrigem(m)
 }
@@ -322,6 +324,10 @@ func (a *API) montarSessao(ctx context.Context, tokenHash []byte) (Sessao, error
 	if s.Organizacoes == nil {
 		s.Organizacoes = []Organizacao{}
 	}
+	if err != nil {
+		return s, err
+	}
+	s.Alcadas, err = a.alcadasDoUsuarioNaOrg(ctx, s.OrganizacaoAtiva.ID, s.Usuario.ID)
 	return s, err
 }
 
