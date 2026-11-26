@@ -16,6 +16,12 @@ const operacaoEmail = "operacao-e2e@exemplo.test";
 const operacaoSenha = envEfetivo.LG_E2E_OPERACAO_SENHA || crypto.randomBytes(18).toString("base64url");
 const semAcessoEmail = "sem-acesso-e2e@exemplo.test";
 const semAcessoSenha = crypto.randomBytes(18).toString("base64url");
+const existenteEmail = "existente-e2e@exemplo.test";
+const existenteSenha = crypto.randomBytes(18).toString("base64url");
+
+function caminhoDoLinkConvite(linkBruto: string): string {
+  return linkBruto.startsWith("http") ? new URL(linkBruto).pathname : linkBruto;
+}
 
 async function entrar(page: Page, email: string, senha: string) {
   await page.goto("/entrar");
@@ -39,6 +45,8 @@ test.beforeAll(() => {
       LG_E2E_OPERACAO_SENHA: operacaoSenha,
       LG_E2E_SEM_ACESSO_EMAIL: semAcessoEmail,
       LG_E2E_SEM_ACESSO_SENHA: semAcessoSenha,
+      LG_E2E_EXISTENTE_EMAIL: existenteEmail,
+      LG_E2E_EXISTENTE_SENHA: existenteSenha,
     },
     stdio: "inherit",
   });
@@ -53,6 +61,7 @@ test.afterAll(() => {
       LG_E2E_BANCO_URL: bancoE2E,
       LG_E2E_OPERACAO_EMAIL: operacaoEmail,
       LG_E2E_SEM_ACESSO_EMAIL: semAcessoEmail,
+      LG_E2E_EXISTENTE_EMAIL: existenteEmail,
     },
     stdio: "inherit",
   });
@@ -245,23 +254,26 @@ test("B8: Administração → Equipe lista casa, impede remover último admin, a
   }
 });
 
-test.fixme("B1, B2, B9, B10: fluxo completo de convite → aceite (conta nova e conta existente) [aguardando S2]", async ({
+test("B1, B2, B4, B6, B9: fluxo completo de convite → reenvio → aceite (conta nova e existente) → cancelamento e bloqueio por URL", async ({
   browser,
 }) => {
-  const convidadoEmail = `convidado-${Date.now()}@exemplo.test`;
+  const sufixo = Date.now();
+  const convidadoEmail = `convidado-e2e-${sufixo}@exemplo.test`;
   const convidadoSenha = crypto.randomBytes(18).toString("base64url");
+  const cancelarEmail = `convidado-e2e-cancelar-${sufixo}@exemplo.test`;
 
   const ctxDono = await browser.newContext();
   const pageDono = await ctxDono.newPage();
   await entrar(pageDono, donoEmail, donoSenha);
 
   await pageDono.getByRole("navigation", { name: "Menu principal" }).getByRole("link", { name: "Pessoas" }).click();
+  await expect(pageDono).toHaveURL(/\/pessoas$/);
 
-  // Convidar pessoa existente retorna 409 claro.
+  // Convidar membro existente retorna 409 claro.
   const formConvite = pageDono.getByTestId("form-convite");
   await formConvite.getByLabel("E-mail").fill(operacaoEmail);
   await formConvite.getByRole("button", { name: "Enviar convite" }).click();
-  await expect(formConvite.getByRole("alert")).toBeVisible();
+  await expect(formConvite.getByRole("alert")).toContainText("já faz parte da organização");
 
   // Cria convite para nova pessoa usando conjunto pronto "Somente leitura".
   await formConvite.getByLabel("E-mail").fill(convidadoEmail);
@@ -270,32 +282,104 @@ test.fixme("B1, B2, B9, B10: fluxo completo de convite → aceite (conta nova e 
 
   const caixaLink = pageDono.getByTestId("convite-link-gerado");
   await expect(caixaLink).toBeVisible();
-  const linkBruto = await caixaLink.getByLabel("Link do convite").inputValue();
-  const caminhoConvite = new URL(linkBruto).pathname;
+  await expect(caixaLink.getByRole("button", { name: "Copiar link" })).toBeVisible();
+  await expect(caixaLink.getByRole("alert")).toBeVisible();
+  const campoLink = caixaLink.getByLabel("Link do convite");
+  const linkAntigo = await campoLink.inputValue();
+  const caminhoAntigo = caminhoDoLinkConvite(linkAntigo);
 
-  await expect(pageDono.getByTestId(`convite-${convidadoEmail}`)).toBeVisible();
+  const linhaConvite = pageDono.getByTestId(`convite-${convidadoEmail}`);
+  await expect(linhaConvite).toBeVisible();
+  await expect(linhaConvite).toContainText("Não enviado");
 
-  // Novo navegador anônimo abre o link do convite e cria conta.
+  // Reenviar gera novo token (invalida o anterior) e mostra novo Copiar link.
+  await linhaConvite.getByRole("button", { name: "Reenviar" }).click();
+  await expect(campoLink).not.toHaveValue(linkAntigo);
+  const caminhoNovo = caminhoDoLinkConvite(await campoLink.inputValue());
+  expect(caminhoNovo).not.toBe(caminhoAntigo);
+
+  // Recarregar a página não mostra mais "Copiar link" (só exibido logo após criar/reenviar).
+  await pageDono.reload();
+  await expect(pageDono.getByTestId("convite-link-gerado")).toHaveCount(0);
+
+  // Novo navegador anônimo valida que o token antigo foi invalidado (404) e aceita o novo.
   const ctxConvidado = await browser.newContext();
   const pageConvidado = await ctxConvidado.newPage();
-  await pageConvidado.goto(caminhoConvite);
 
+  await pageConvidado.goto(caminhoAntigo);
+  await expect(pageConvidado.getByRole("heading", { name: /Convite inválido/ })).toBeVisible();
+
+  await pageConvidado.goto(caminhoNovo);
   await expect(pageConvidado.getByRole("heading", { name: /Convite para Laura Growth/ })).toBeVisible();
+  await expect(pageConvidado.getByText("co***@exemplo.test")).toBeVisible();
   await pageConvidado.getByLabel("Nome").fill("Convidado E2E");
   await pageConvidado.getByLabel("Senha").fill(convidadoSenha);
   await pageConvidado.getByRole("button", { name: "Criar conta e aceitar convite" }).click();
   await expect(pageConvidado).toHaveURL(/\/inicio$/);
 
-  // Convidado tem somente leitura: /kit abre, /pessoas bloqueia com Sem acesso.
+  // Convidado tem somente leitura: /kit abre sem botões de edição, /pessoas bloqueia com Sem acesso.
   await pageConvidado.goto("/kit");
   await expect(pageConvidado.getByText("Modo somente leitura")).toBeVisible();
+  await expect(pageConvidado.getByRole("button", { name: "Salvar kit de marca" })).toHaveCount(0);
   await pageConvidado.goto("/pessoas");
   await expect(pageConvidado.getByTestId("estado-sem-acesso")).toContainText("Sem acesso");
 
-  // Reabrir link já usado mostra convite inválido (404).
-  await pageConvidado.goto(caminhoConvite);
+  // Uso único: reabrir link já aceito mostra convite inválido (404).
+  await pageConvidado.goto(caminhoNovo);
   await expect(pageConvidado.getByRole("heading", { name: /Convite inválido/ })).toBeVisible();
-
   await ctxConvidado.close();
+
+  // Histórico e lista de membros refletem o aceite do convite.
+  await pageDono.reload();
+  await expect(pageDono.getByTestId(`membro-${convidadoEmail}`)).toBeVisible();
+  await expect(pageDono.getByTestId(`convite-${convidadoEmail}`)).toHaveCount(0);
+  const historico = pageDono.getByTestId("historico-acessos");
+  await expect(historico).toContainText("Convite criado");
+  await expect(historico).toContainText("Convite reenviado");
+  await expect(historico).toContainText("Convite aceito");
+
+  // Fluxo com conta existente: 403 email_diferente ao aceitar logado com outra conta, depois login e aceite.
+  await formConvite.getByLabel("E-mail").fill(existenteEmail);
+  await formConvite.getByLabel("Ver a marca e os posts").check();
+  await formConvite.getByRole("button", { name: "Enviar convite" }).click();
+  await expect(caixaLink).toBeVisible();
+  const caminhoExistente = caminhoDoLinkConvite(await caixaLink.getByLabel("Link do convite").inputValue());
+
+  const ctxExistente = await browser.newContext();
+  const pageExistente = await ctxExistente.newPage();
+  await entrar(pageExistente, operacaoEmail, operacaoSenha);
+  await pageExistente.goto(caminhoExistente);
+  await expect(pageExistente.getByText(`conectado como ${operacaoEmail}`)).toBeVisible();
+  await pageExistente.getByRole("button", { name: "Aceitar convite" }).click();
+  await expect(pageExistente.getByRole("alert").filter({ hasText: "outro e-mail" })).toBeVisible();
+
+  await pageExistente.getByRole("button", { name: /Sair e entrar com o e-mail convidado/ }).click();
+  await pageExistente.getByLabel("E-mail").fill(existenteEmail);
+  await pageExistente.getByLabel("Senha").fill(existenteSenha);
+  await pageExistente.getByRole("button", { name: "Entrar para aceitar" }).click();
+  await expect(pageExistente.getByText(`conectado como ${existenteEmail}`)).toBeVisible();
+  await pageExistente.getByRole("button", { name: "Aceitar convite" }).click();
+  await expect(pageExistente).toHaveURL(/\/inicio$/);
+  await ctxExistente.close();
+
+  // Cancelar convite pendente remove da lista e invalida o link.
+  await formConvite.getByLabel("E-mail").fill(cancelarEmail);
+  await formConvite.getByLabel("Ver a marca e os posts").check();
+  await formConvite.getByRole("button", { name: "Enviar convite" }).click();
+  await expect(caixaLink).toBeVisible();
+  const caminhoCancelado = caminhoDoLinkConvite(await caixaLink.getByLabel("Link do convite").inputValue());
+
+  const linhaCancelar = pageDono.getByTestId(`convite-${cancelarEmail}`);
+  await expect(linhaCancelar).toBeVisible();
+  pageDono.once("dialog", (d) => d.accept());
+  await linhaCancelar.getByRole("button", { name: "Cancelar" }).click();
+  await expect(linhaCancelar).toHaveCount(0);
+
+  const ctxAnon = await browser.newContext();
+  const pageAnon = await ctxAnon.newPage();
+  await pageAnon.goto(caminhoCancelado);
+  await expect(pageAnon.getByRole("heading", { name: /Convite inválido/ })).toBeVisible();
+  await ctxAnon.close();
+
   await ctxDono.close();
 });

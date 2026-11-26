@@ -86,6 +86,7 @@ func main() {
 		os.Exit(2)
 	}
 	semAcessoEmail := strings.TrimSpace(os.Getenv("LG_E2E_SEM_ACESSO_EMAIL"))
+	existenteEmail := strings.TrimSpace(os.Getenv("LG_E2E_EXISTENTE_EMAIL"))
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, bancoURL)
@@ -106,6 +107,20 @@ func main() {
 				fmt.Fprintf(os.Stderr, "erro ao limpar usuário sem acesso: %v\n", err)
 				os.Exit(1)
 			}
+		}
+		if existenteEmail != "" {
+			if _, err := pool.Exec(ctx, `DELETE FROM usuarios WHERE lower(email) = lower($1)`, existenteEmail); err != nil {
+				fmt.Fprintf(os.Stderr, "erro ao limpar usuário existente E2E: %v\n", err)
+				os.Exit(1)
+			}
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM convites WHERE lower(email) LIKE 'convidado-e2e-%@exemplo.test'`); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao limpar convites E2E: %v\n", err)
+			os.Exit(1)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM usuarios WHERE lower(email) LIKE 'convidado-e2e-%@exemplo.test'`); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao limpar usuários convidados E2E: %v\n", err)
+			os.Exit(1)
 		}
 		return
 	case "preparar":
@@ -162,6 +177,47 @@ func main() {
 		}
 		if err := upsertMembroE2E(ctx, tx, orgID, "Sem Acesso E2E", semAcessoEmail, string(hashSemAcesso), nil); err != nil {
 			fmt.Fprintf(os.Stderr, "erro ao salvar usuário sem acesso: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	if existenteEmail != "" {
+		existenteSenha := os.Getenv("LG_E2E_EXISTENTE_SENHA")
+		if len(existenteSenha) < 10 {
+			fmt.Fprintln(os.Stderr, "defina LG_E2E_EXISTENTE_SENHA com pelo menos 10 caracteres")
+			os.Exit(2)
+		}
+		hashExistente, err := bcrypt.GenerateFromPassword([]byte(existenteSenha), 12)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao gerar hash: %v\n", err)
+			os.Exit(1)
+		}
+		var existenteID string
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO usuarios (nome, email, senha_hash, admin_plataforma)
+			VALUES ('Existente E2E', $1, $2, false)
+			ON CONFLICT ((lower(email))) DO UPDATE
+				SET nome = EXCLUDED.nome,
+				    senha_hash = EXCLUDED.senha_hash,
+				    admin_plataforma = false
+			RETURNING id::text`, existenteEmail, string(hashExistente)).Scan(&existenteID); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao salvar usuário existente E2E: %v\n", err)
+			os.Exit(1)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM membros WHERE usuario_id = $1::uuid`, existenteID); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao limpar vínculos do usuário existente E2E: %v\n", err)
+			os.Exit(1)
+		}
+		var orgHubID string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM organizacoes WHERE nome = 'Laura Hub'`).Scan(&orgHubID); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao buscar organização Laura Hub: %v\n", err)
+			os.Exit(1)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO membros (organizacao_id, usuario_id, papel)
+			VALUES ($1::uuid, $2::uuid, 'membro')
+			ON CONFLICT DO NOTHING`, orgHubID, existenteID); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao vincular usuário existente E2E à Laura Hub: %v\n", err)
 			os.Exit(1)
 		}
 	}
