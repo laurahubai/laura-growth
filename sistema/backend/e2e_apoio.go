@@ -2,15 +2,22 @@
 
 // Utilitário exclusivo para preparação e limpeza do banco nos testes E2E (Playwright).
 // Exige LG_E2E_BANCO_URL apontando para um banco cujo nome termine com _teste ou _e2e.
-// Uso: go run ./e2e_apoio.go [preparar|limpar]
+// Uso:
+//
+//	go run ./e2e_apoio.go preparar
+//	go run ./e2e_apoio.go limpar
+//	go run ./e2e_apoio.go expirar-convite <email>
+//	go run ./e2e_apoio.go semear-pendentes <orgNome> <quantidade>
 package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -34,7 +41,7 @@ func validarBancoE2E(raw string) (string, error) {
 	return u, nil
 }
 
-func upsertMembroE2E(ctx context.Context, tx pgx.Tx, orgID, nome, email, senhaHash string, alcadas []string) error {
+func upsertUsuarioE2E(ctx context.Context, tx pgx.Tx, nome, email, senhaHash string) (string, error) {
 	var usuarioID string
 	err := tx.QueryRow(ctx, `
 		INSERT INTO usuarios (nome, email, senha_hash, admin_plataforma)
@@ -44,13 +51,18 @@ func upsertMembroE2E(ctx context.Context, tx pgx.Tx, orgID, nome, email, senhaHa
 			    senha_hash = EXCLUDED.senha_hash,
 			    admin_plataforma = false
 		RETURNING id::text`, nome, email, senhaHash).Scan(&usuarioID)
+	return usuarioID, err
+}
+
+func upsertMembroE2E(ctx context.Context, tx pgx.Tx, orgID, nome, email, senhaHash, papel string, alcadas []string) error {
+	usuarioID, err := upsertUsuarioE2E(ctx, tx, nome, email, senhaHash)
 	if err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO membros (organizacao_id, usuario_id, papel)
-		VALUES ($1, $2, 'membro')
-		ON CONFLICT (organizacao_id, usuario_id) DO UPDATE SET papel = 'membro'`, orgID, usuarioID); err != nil {
+		VALUES ($1::uuid, $2::uuid, $3)
+		ON CONFLICT (organizacao_id, usuario_id) DO UPDATE SET papel = EXCLUDED.papel`, orgID, usuarioID, papel); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
@@ -68,6 +80,37 @@ func upsertMembroE2E(ctx context.Context, tx pgx.Tx, orgID, nome, email, senhaHa
 	return nil
 }
 
+func garantirOrganizacaoE2E(ctx context.Context, tx pgx.Tx, nomeOrg string) (string, error) {
+	var orgID string
+	err := tx.QueryRow(ctx, `SELECT id::text FROM organizacoes WHERE nome = $1`, nomeOrg).Scan(&orgID)
+	if err == nil {
+		return orgID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	if nomeOrg == "Laura Growth" || nomeOrg == "Laura Hub" {
+		return "", errors.New("organização base não encontrada; execute semear antes")
+	}
+	err = tx.QueryRow(ctx, `
+		INSERT INTO organizacoes (nome, tipo, da_casa)
+		VALUES ($1, 'empresa', false)
+		RETURNING id::text`, nomeOrg).Scan(&orgID)
+	return orgID, err
+}
+
+func hashSenhaEnv(varNome string) (string, error) {
+	senha := os.Getenv(varNome)
+	if len(senha) < 10 {
+		return "", fmt.Errorf("defina %s com pelo menos 10 caracteres", varNome)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(senha), 12)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
 func main() {
 	bancoURL, err := validarBancoE2E(os.Getenv("LG_E2E_BANCO_URL"))
 	if err != nil {
@@ -80,14 +123,6 @@ func main() {
 		acao = os.Args[1]
 	}
 
-	email := strings.TrimSpace(os.Getenv("LG_E2E_OPERACAO_EMAIL"))
-	if email == "" {
-		fmt.Fprintln(os.Stderr, "defina LG_E2E_OPERACAO_EMAIL")
-		os.Exit(2)
-	}
-	semAcessoEmail := strings.TrimSpace(os.Getenv("LG_E2E_SEM_ACESSO_EMAIL"))
-	existenteEmail := strings.TrimSpace(os.Getenv("LG_E2E_EXISTENTE_EMAIL"))
-
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, bancoURL)
 	if err != nil {
@@ -97,24 +132,79 @@ func main() {
 	defer pool.Close()
 
 	switch acao {
-	case "limpar":
-		if _, err := pool.Exec(ctx, `DELETE FROM usuarios WHERE lower(email) = lower($1)`, email); err != nil {
-			fmt.Fprintf(os.Stderr, "erro ao limpar usuário de teste: %v\n", err)
+	case "expirar-convite":
+		if len(os.Args) < 3 || strings.TrimSpace(os.Args[2]) == "" {
+			fmt.Fprintln(os.Stderr, "uso: expirar-convite <email>")
+			os.Exit(2)
+		}
+		emailAlvo := strings.TrimSpace(os.Args[2])
+		tag, err := pool.Exec(ctx, `
+			UPDATE convites
+			SET expira_em = now() - interval '1 hour'
+			WHERE lower(email) = lower($1)
+			  AND aceito_em IS NULL
+			  AND revogado_em IS NULL`, emailAlvo)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao expirar convite: %v\n", err)
 			os.Exit(1)
 		}
-		if semAcessoEmail != "" {
-			if _, err := pool.Exec(ctx, `DELETE FROM usuarios WHERE lower(email) = lower($1)`, semAcessoEmail); err != nil {
-				fmt.Fprintf(os.Stderr, "erro ao limpar usuário sem acesso: %v\n", err)
+		if tag.RowsAffected() == 0 {
+			fmt.Fprintf(os.Stderr, "nenhum convite pendente encontrado para %s\n", emailAlvo)
+			os.Exit(1)
+		}
+		return
+
+	case "semear-pendentes":
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "uso: semear-pendentes <orgNome> <quantidade>")
+			os.Exit(2)
+		}
+		orgNome := strings.TrimSpace(os.Args[2])
+		qtd, err := strconv.Atoi(os.Args[3])
+		if err != nil || qtd < 1 || qtd > 50 {
+			fmt.Fprintln(os.Stderr, "quantidade inválida (1..50)")
+			os.Exit(2)
+		}
+		if orgNome == "Laura Growth" || orgNome == "Laura Hub" {
+			fmt.Fprintln(os.Stderr, "recusado: use organização temporária para semear pendentes")
+			os.Exit(2)
+		}
+		var orgID string
+		if err := pool.QueryRow(ctx, `SELECT id::text FROM organizacoes WHERE nome = $1`, orgNome).Scan(&orgID); err != nil {
+			fmt.Fprintf(os.Stderr, "organização não encontrada: %v\n", err)
+			os.Exit(1)
+		}
+		for i := 0; i < qtd; i++ {
+			sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", orgID, i)))
+			emailFicticio := fmt.Sprintf("pendente-e2e-%d@exemplo.test", i)
+			if _, err := pool.Exec(ctx, `
+				INSERT INTO convites (organizacao_id, email, alcadas, token_hash, expira_em, envio_estado)
+				VALUES ($1::uuid, $2, ARRAY['ver_marca_posts']::text[], $3, now() + interval '7 days', 'falhou')`,
+				orgID, emailFicticio, sum[:]); err != nil {
+				fmt.Fprintf(os.Stderr, "erro ao inserir convite pendente E2E: %v\n", err)
 				os.Exit(1)
 			}
 		}
-		if existenteEmail != "" {
-			if _, err := pool.Exec(ctx, `DELETE FROM usuarios WHERE lower(email) = lower($1)`, existenteEmail); err != nil {
-				fmt.Fprintf(os.Stderr, "erro ao limpar usuário existente E2E: %v\n", err)
-				os.Exit(1)
+		return
+
+	case "limpar":
+		varsEmails := []string{
+			"LG_E2E_OPERACAO_EMAIL",
+			"LG_E2E_SEM_ACESSO_EMAIL",
+			"LG_E2E_EXISTENTE_EMAIL",
+			"LG_E2E_REMOVER_EMAIL",
+			"LG_E2E_GERENCIADOR_EMAIL",
+			"LG_E2E_ORG_DONO_EMAIL",
+		}
+		for _, v := range varsEmails {
+			if em := strings.TrimSpace(os.Getenv(v)); em != "" {
+				if _, err := pool.Exec(ctx, `DELETE FROM usuarios WHERE lower(email) = lower($1)`, em); err != nil {
+					fmt.Fprintf(os.Stderr, "erro ao limpar usuário (%s): %v\n", v, err)
+					os.Exit(1)
+				}
 			}
 		}
-		if _, err := pool.Exec(ctx, `DELETE FROM convites WHERE lower(email) LIKE 'convidado-e2e-%@exemplo.test'`); err != nil {
+		if _, err := pool.Exec(ctx, `DELETE FROM convites WHERE lower(email) LIKE 'convidado-e2e-%@exemplo.test' OR lower(email) LIKE 'pendente-e2e-%@exemplo.test'`); err != nil {
 			fmt.Fprintf(os.Stderr, "erro ao limpar convites E2E: %v\n", err)
 			os.Exit(1)
 		}
@@ -122,23 +212,23 @@ func main() {
 			fmt.Fprintf(os.Stderr, "erro ao limpar usuários convidados E2E: %v\n", err)
 			os.Exit(1)
 		}
+		if orgNome := strings.TrimSpace(os.Getenv("LG_E2E_ORG_NOME")); orgNome != "" && orgNome != "Laura Growth" && orgNome != "Laura Hub" {
+			if _, err := pool.Exec(ctx, `DELETE FROM organizacoes WHERE nome = $1`, orgNome); err != nil {
+				fmt.Fprintf(os.Stderr, "erro ao limpar organização temporária E2E: %v\n", err)
+				os.Exit(1)
+			}
+		}
 		return
+
 	case "preparar":
 	default:
 		fmt.Fprintf(os.Stderr, "ação desconhecida: %s\n", acao)
 		os.Exit(2)
 	}
 
-	senha := os.Getenv("LG_E2E_OPERACAO_SENHA")
-	if len(senha) < 10 {
-		fmt.Fprintln(os.Stderr, "defina LG_E2E_OPERACAO_SENHA com pelo menos 10 caracteres")
-		os.Exit(2)
-	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(senha), 12)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "erro ao gerar hash: %v\n", err)
-		os.Exit(1)
+	orgAlvoNome := strings.TrimSpace(os.Getenv("LG_E2E_ORG_NOME"))
+	if orgAlvoNome == "" {
+		orgAlvoNome = "Laura Growth"
 	}
 
 	tx, err := pool.Begin(ctx)
@@ -148,59 +238,80 @@ func main() {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	var orgID string
-	err = tx.QueryRow(ctx, `SELECT id::text FROM organizacoes WHERE nome = 'Laura Growth'`).Scan(&orgID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		fmt.Fprintln(os.Stderr, "organização Laura Growth não encontrada; execute semear antes")
-		os.Exit(1)
-	}
+	orgID, err := garantirOrganizacaoE2E(ctx, tx, orgAlvoNome)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "erro ao buscar organização: %v\n", err)
+		fmt.Fprintf(os.Stderr, "erro ao preparar organização: %v\n", err)
 		os.Exit(1)
 	}
 
-	if err := upsertMembroE2E(ctx, tx, orgID, "Operação E2E", email, string(hash), []string{"ver_marca_posts"}); err != nil {
-		fmt.Fprintf(os.Stderr, "erro ao salvar usuário de teste: %v\n", err)
-		os.Exit(1)
-	}
-
-	if semAcessoEmail != "" {
-		semAcessoSenha := os.Getenv("LG_E2E_SEM_ACESSO_SENHA")
-		if len(semAcessoSenha) < 10 {
-			fmt.Fprintln(os.Stderr, "defina LG_E2E_SEM_ACESSO_SENHA com pelo menos 10 caracteres")
+	if donoOrgEmail := strings.TrimSpace(os.Getenv("LG_E2E_ORG_DONO_EMAIL")); donoOrgEmail != "" {
+		hashDono, err := hashSenhaEnv("LG_E2E_ORG_DONO_SENHA")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
-		hashSemAcesso, err := bcrypt.GenerateFromPassword([]byte(semAcessoSenha), 12)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "erro ao gerar hash: %v\n", err)
+		if err := upsertMembroE2E(ctx, tx, orgID, "Dono Temporário E2E", donoOrgEmail, hashDono, "dono", nil); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao salvar dono da organização E2E: %v\n", err)
 			os.Exit(1)
 		}
-		if err := upsertMembroE2E(ctx, tx, orgID, "Sem Acesso E2E", semAcessoEmail, string(hashSemAcesso), nil); err != nil {
+	}
+
+	if email := strings.TrimSpace(os.Getenv("LG_E2E_OPERACAO_EMAIL")); email != "" {
+		hash, err := hashSenhaEnv("LG_E2E_OPERACAO_SENHA")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		if err := upsertMembroE2E(ctx, tx, orgID, "Operação E2E", email, hash, "membro", []string{"ver_marca_posts"}); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao salvar usuário de teste: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	if semAcessoEmail := strings.TrimSpace(os.Getenv("LG_E2E_SEM_ACESSO_EMAIL")); semAcessoEmail != "" {
+		hashSemAcesso, err := hashSenhaEnv("LG_E2E_SEM_ACESSO_SENHA")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		if err := upsertMembroE2E(ctx, tx, orgID, "Sem Acesso E2E", semAcessoEmail, hashSemAcesso, "membro", nil); err != nil {
 			fmt.Fprintf(os.Stderr, "erro ao salvar usuário sem acesso: %v\n", err)
 			os.Exit(1)
 		}
 	}
 
-	if existenteEmail != "" {
-		existenteSenha := os.Getenv("LG_E2E_EXISTENTE_SENHA")
-		if len(existenteSenha) < 10 {
-			fmt.Fprintln(os.Stderr, "defina LG_E2E_EXISTENTE_SENHA com pelo menos 10 caracteres")
+	if removerEmail := strings.TrimSpace(os.Getenv("LG_E2E_REMOVER_EMAIL")); removerEmail != "" {
+		hashRemover, err := hashSenhaEnv("LG_E2E_REMOVER_SENHA")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
-		hashExistente, err := bcrypt.GenerateFromPassword([]byte(existenteSenha), 12)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "erro ao gerar hash: %v\n", err)
+		if err := upsertMembroE2E(ctx, tx, orgID, "Remover E2E", removerEmail, hashRemover, "membro", nil); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao salvar usuário removível E2E: %v\n", err)
 			os.Exit(1)
 		}
-		var existenteID string
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO usuarios (nome, email, senha_hash, admin_plataforma)
-			VALUES ('Existente E2E', $1, $2, false)
-			ON CONFLICT ((lower(email))) DO UPDATE
-				SET nome = EXCLUDED.nome,
-				    senha_hash = EXCLUDED.senha_hash,
-				    admin_plataforma = false
-			RETURNING id::text`, existenteEmail, string(hashExistente)).Scan(&existenteID); err != nil {
+	}
+
+	if gerenciadorEmail := strings.TrimSpace(os.Getenv("LG_E2E_GERENCIADOR_EMAIL")); gerenciadorEmail != "" {
+		hashGerenciador, err := hashSenhaEnv("LG_E2E_GERENCIADOR_SENHA")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		if err := upsertMembroE2E(ctx, tx, orgID, "Gerenciador E2E", gerenciadorEmail, hashGerenciador, "membro", []string{"gerenciar_pessoas"}); err != nil {
+			fmt.Fprintf(os.Stderr, "erro ao salvar gerenciador E2E: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	if existenteEmail := strings.TrimSpace(os.Getenv("LG_E2E_EXISTENTE_EMAIL")); existenteEmail != "" {
+		hashExistente, err := hashSenhaEnv("LG_E2E_EXISTENTE_SENHA")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		existenteID, err := upsertUsuarioE2E(ctx, tx, "Existente E2E", existenteEmail, hashExistente)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "erro ao salvar usuário existente E2E: %v\n", err)
 			os.Exit(1)
 		}

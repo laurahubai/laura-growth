@@ -87,12 +87,13 @@ export default function PaginaConvite() {
       formCadastro.setError("nome", { message: "Informe seu nome." });
       return;
     }
-    if (campos.senha.length < 10) {
+    const bytesSenha = new TextEncoder().encode(campos.senha).length;
+    if (bytesSenha < 10) {
       formCadastro.setError("senha", { message: "A senha precisa ter pelo menos 10 caracteres." });
       return;
     }
-    if (campos.senha.length > 72) {
-      formCadastro.setError("senha", { message: "A senha pode ter no máximo 72 caracteres." });
+    if (bytesSenha > 72) {
+      formCadastro.setError("senha", { message: "A senha pode ter no máximo 72 bytes." });
       return;
     }
     aceitar.mutate(

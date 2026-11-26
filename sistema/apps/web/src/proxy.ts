@@ -5,12 +5,16 @@ import { NextResponse, type NextRequest } from "next/server";
 export function proxy(request: NextRequest) {
   const temSessao = Boolean(request.cookies.get("lg_sessao")?.value);
   const caminho = request.nextUrl.pathname;
-  const rotaPublica =
-    caminho.startsWith("/entrar") || caminho === "/convite" || caminho.startsWith("/convite/");
+  const ehConvite = caminho === "/convite" || caminho.startsWith("/convite/");
+  const rotaPublica = caminho.startsWith("/entrar") || ehConvite;
   if (!temSessao && !rotaPublica) {
     return NextResponse.redirect(new URL("/entrar", request.url));
   }
-  return NextResponse.next();
+  const resposta = NextResponse.next();
+  if (ehConvite) {
+    resposta.headers.set("Referrer-Policy", "no-referrer");
+  }
+  return resposta;
 }
 
 export const config = {

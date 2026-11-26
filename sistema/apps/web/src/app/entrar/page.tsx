@@ -19,7 +19,7 @@ export default function Entrar() {
       onSuccess: () => {
         const proximo =
           typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("proximo") : null;
-        const destino = proximo && proximo.startsWith("/convite/") && !proximo.startsWith("//") ? proximo : "/inicio";
+        const destino = proximo && /^\/convite\/[A-Za-z0-9_-]+$/.test(proximo) ? proximo : "/inicio";
         router.replace(destino);
       },
     });

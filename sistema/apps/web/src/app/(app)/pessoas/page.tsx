@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Check, Copy, MailPlus, RefreshCw, Shield, Trash2, UserMinus, X } from "lucide-react";
 import {
@@ -38,11 +38,25 @@ export default function PaginaPessoas() {
   const removerPessoa = useRemoverPessoa(orgId);
 
   const [editando, setEditando] = useState<PessoaMembro | null>(null);
+  const gatilhoEdicaoRef = useRef<HTMLElement | null>(null);
   const [alcadasConvite, setAlcadasConvite] = useState<Alcada[]>([]);
+  const [erroAlcadasConvite, setErroAlcadasConvite] = useState("");
   const [versaoFormConvite, setVersaoFormConvite] = useState(0);
   const [conviteRecente, setConviteRecente] = useState<RespostaConviteCriado | null>(null);
   const [copiado, setCopiado] = useState(false);
   const [erroAcao, setErroAcao] = useState("");
+
+  const abrirEdicao = useCallback((m: PessoaMembro) => {
+    gatilhoEdicaoRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setEditando(m);
+  }, []);
+
+  const fecharEdicao = useCallback(() => {
+    setEditando(null);
+    requestAnimationFrame(() => {
+      gatilhoEdicaoRef.current?.focus();
+    });
+  }, []);
 
   const {
     register,
@@ -75,6 +89,7 @@ export default function PaginaPessoas() {
 
   const enviarConvite = handleSubmit((campos) => {
     setErroAcao("");
+    setErroAlcadasConvite("");
     criarConvite.reset();
     const emailLimpo = campos.email.trim().toLowerCase();
     const validado = PedidoCriarConvite.safeParse({
@@ -86,6 +101,10 @@ export default function PaginaPessoas() {
       setError("email", { message: erroEmail ? "Informe um e-mail válido." : "Confira os dados do convite." });
       return;
     }
+    if (validado.data.alcadas.length === 0) {
+      setErroAlcadasConvite("Selecione pelo menos uma alçada antes de enviar o convite.");
+      return;
+    }
 
     criarConvite.mutate(validado.data, {
       onSuccess: (res) => {
@@ -93,6 +112,7 @@ export default function PaginaPessoas() {
         setCopiado(false);
         resetarFormConvite();
         setAlcadasConvite([]);
+        setErroAlcadasConvite("");
         setVersaoFormConvite((v) => v + 1);
       },
     });
@@ -264,7 +284,7 @@ export default function PaginaPessoas() {
                               <button
                                 type="button"
                                 className="btn peq"
-                                onClick={() => setEditando(m)}
+                                onClick={() => abrirEdicao(m)}
                               >
                                 <Shield size={14} aria-hidden /> Editar alçadas
                               </button>
@@ -309,9 +329,24 @@ export default function PaginaPessoas() {
             <SeletorAlcadas
               key={versaoFormConvite}
               alcadas={alcadasConvite}
-              aoMudar={setAlcadasConvite}
+              aoMudar={(novas) => {
+                setAlcadasConvite(novas);
+                if (novas.length > 0) setErroAlcadasConvite("");
+              }}
               conjuntos={dados.conjuntos}
             />
+
+            {alcadasConvite.length === 0 && (
+              <p className="small muted" style={{ margin: 0 }}>
+                Escolha ao menos uma alçada. Sem alçadas, a pessoa não poderá acessar nenhuma área da organização.
+              </p>
+            )}
+
+            {erroAlcadasConvite && (
+              <div className="alerta t-warning" role="alert">
+                {erroAlcadasConvite}
+              </div>
+            )}
 
             {criarConvite.isError && (
               <div className="alerta t-danger" role="alert">
@@ -423,7 +458,7 @@ export default function PaginaPessoas() {
           orgId={orgId}
           pessoa={editando}
           conjuntos={dados.conjuntos}
-          aoFechar={() => setEditando(null)}
+          aoFechar={fecharEdicao}
         />
       )}
     </div>
@@ -443,10 +478,36 @@ function GavetaEditarAlcadas({
 }) {
   const salvar = useSalvarAlcadasPessoa(orgId);
   const [alcadas, setAlcadas] = useState<Alcada[]>(pessoa.alcadas);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const primeiroCheckbox = dialogRef.current?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    primeiroCheckbox?.focus();
+  }, []);
 
   useEffect(() => {
     const aoTeclar = (e: KeyboardEvent) => {
-      if (e.key === "Escape") aoFechar();
+      if (e.key === "Escape") {
+        aoFechar();
+        return;
+      }
+      if (e.key === "Tab" && dialogRef.current) {
+        const focaveis = Array.from(
+          dialogRef.current.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), select:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
+          ),
+        );
+        if (focaveis.length === 0) return;
+        const primeiro = focaveis[0];
+        const ultimo = focaveis[focaveis.length - 1];
+        if (e.shiftKey && document.activeElement === primeiro) {
+          e.preventDefault();
+          ultimo.focus();
+        } else if (!e.shiftKey && document.activeElement === ultimo) {
+          e.preventDefault();
+          primeiro.focus();
+        }
+      }
     };
     window.addEventListener("keydown", aoTeclar);
     return () => window.removeEventListener("keydown", aoTeclar);
@@ -463,6 +524,7 @@ function GavetaEditarAlcadas({
   return (
     <div className="drawer-fundo" onClick={aoFechar}>
       <div
+        ref={dialogRef}
         className="drawer stack"
         role="dialog"
         aria-modal="true"

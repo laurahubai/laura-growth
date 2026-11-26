@@ -16,6 +16,13 @@ export default function PaginaEquipeAdmin() {
   if (bloqueado) return <div className="vazio" role="alert">{bloqueado}</div>;
 
   const alternarAdmin = (m: MembroEquipe) => {
+    if (m.adminPlataforma) {
+      const ehVoce = m.usuarioId === sessao?.usuario.id;
+      const textoConfirmacao = ehVoce
+        ? "Retirar seu próprio acesso de administrador da plataforma? Você perderá acesso imediato à Administração."
+        : `Retirar o acesso de administrador de "${m.nome}" (${m.email})?`;
+      if (!confirm(textoConfirmacao)) return;
+    }
     setErroAcao("");
     atualizar.mutate(
       { usuarioId: m.usuarioId, dados: { adminPlataforma: !m.adminPlataforma } },
@@ -93,7 +100,7 @@ export default function PaginaEquipeAdmin() {
                       </td>
                       <td>
                         <span className={`badge ${m.adminPlataforma ? "t-brand" : "t-neutral"}`}>
-                          {m.adminPlataforma ? "Administrador" : "Sem acesso"}
+                          {m.adminPlataforma ? "Administrador" : "Não é administrador"}
                         </span>
                       </td>
                       <td>
@@ -105,11 +112,11 @@ export default function PaginaEquipeAdmin() {
                         >
                           {m.adminPlataforma ? (
                             <>
-                              <ShieldOff size={14} aria-hidden /> Remover admin
+                              <ShieldOff size={14} aria-hidden /> Retirar acesso de administrador
                             </>
                           ) : (
                             <>
-                              <ShieldCheck size={14} aria-hidden /> Tornar admin
+                              <ShieldCheck size={14} aria-hidden /> Dar acesso de administrador
                             </>
                           )}
                         </button>

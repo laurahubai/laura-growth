@@ -17,7 +17,7 @@ type ItemMenu = {
 const MENU: { grupo: string; itens: ItemMenu[] }[] = [
   { grupo: "Trabalho", itens: [{ href: "/inicio", nome: "Início", icone: Home }] },
   {
-    grupo: "Organização",
+    grupo: "Operação",
     itens: [
       { href: "/kit", nome: "Kit de marca", icone: Palette, alcada: "ver_marca_posts" },
       { href: "/pessoas", nome: "Pessoas", icone: Users, alcada: "gerenciar_pessoas" },

@@ -10,6 +10,14 @@ const config: NextConfig = {
   distDir,
   transpilePackages: ["@laura-growth/contratos"],
   poweredByHeader: false,
+  async headers() {
+    return [
+      {
+        source: "/convite/:path*",
+        headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
+      },
+    ];
+  },
   async rewrites() {
     return [{ source: "/api/:caminho*", destination: `${apiInterna}/api/:caminho*` }];
   },
