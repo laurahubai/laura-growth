@@ -201,6 +201,12 @@ func TestEtapa2CC1CamposAmpliadosEValidacao(t *testing.T) {
 		t.Fatalf("canais esperados %v, veio %v", canaisEsperados, k.Canais)
 	}
 
+	if st := c.pedir("PUT", "/api/kit", map[string]any{
+		"organizacaoId": growth.ID, "versaoBase": lido.Versao, "modeloNegocio": "b2b", "modeloOutro": "Texto ignorado",
+	}, &lido); st != 200 || lido.Kit.ModeloOutro != "" {
+		t.Fatalf("modeloNegocio != outro deveria limpar modeloOutro, veio %+v", lido.Kit)
+	}
+
 	// Rejeições 400 dados_invalidos: modeloNegocio inválido, canal inválido, textos/produtos acima do limite.
 	var produtosDemais []ProdutoKit
 	for i := 0; i < 21; i++ {
@@ -254,7 +260,7 @@ func TestEtapa2CC3OrigensEConfirmacao(t *testing.T) {
 	}
 
 	// gravarSugestoesIA grava valores, origens sugerido_ia (definidoPor null) e versão autor_tipo 'ia'.
-	err := api.gravarSugestoesIA(context.Background(), growth.ID, map[string]any{
+	resIA, err := api.gravarSugestoesIA(context.Background(), growth.ID, map[string]any{
 		"tomDeVoz":      "Direto e acolhedor",
 		"diferencial":   "Entrega em 48 horas",
 		"modeloNegocio": "outro",
@@ -265,6 +271,9 @@ func TestEtapa2CC3OrigensEConfirmacao(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("gravarSugestoesIA falhou: %v", err)
+	}
+	if len(resIA.Aplicados) != 5 || len(resIA.Ignorados) != 0 {
+		t.Fatalf("retorno gravarSugestoesIA inesperado: %+v", resIA)
 	}
 
 	if st := c.pedir("GET", "/api/kit", nil, &r); st != 200 {
@@ -345,7 +354,7 @@ func TestEtapa2CC4VersoesEHistorico(t *testing.T) {
 		t.Fatalf("v1 falhou: %d %+v", st, r.Versao)
 	}
 	// Versão 2: IA
-	if err := api.gravarSugestoesIA(context.Background(), growth.ID, map[string]any{"diferencial": "IA sugere"}); err != nil {
+	if _, err := api.gravarSugestoesIA(context.Background(), growth.ID, map[string]any{"diferencial": "IA sugere"}); err != nil {
 		t.Fatalf("v2 IA falhou: %v", err)
 	}
 	c.pedir("GET", "/api/kit", nil, &r)
@@ -440,7 +449,7 @@ func TestEtapa2CC5ConcorrenciaVersao(t *testing.T) {
 	}, &r); st != 200 || r.Versao != 1 {
 		t.Fatalf("PUT inicial falhou: %d", st)
 	}
-	if err := api.gravarSugestoesIA(context.Background(), growth.ID, map[string]any{"diferencial": "Sugerido"}); err != nil {
+	if _, err := api.gravarSugestoesIA(context.Background(), growth.ID, map[string]any{"diferencial": "Sugerido"}); err != nil {
 		t.Fatalf("IA falhou: %v", err)
 	}
 	// Agora versão atual = 2.
@@ -652,10 +661,15 @@ func TestEtapa2CC7AutorizacaoEIsolamento(t *testing.T) {
 		}
 	}
 
-	// Membro só com ver_marca_posts -> lê kit e versões, mas recebe 403 ao salvar/confirmar.
+	// Membro só com ver_marca_posts -> lê kit e versões, mas recebe 403 ao salvar/confirmar e em arquivos.
 	criarMembroNaOrg(t, api.banco, growth.ID, "Leitor", "leitor-2c@exemplo.com", "ver_marca_posts")
 	cliLeitor := novoCliente(t, api)
 	entrarComEmail(t, cliLeitor, "leitor-2c@exemplo.com")
+	paulo.pedir("PUT", "/api/sessao/organizacao", map[string]string{"organizacaoId": growth.ID}, nil)
+	var logoGrowth ArquivoMarca
+	if st := paulo.enviar("/api/kit/arquivos?tipo=logo&organizacaoId="+growth.ID, "growth-logo.png", pngMinimo, &logoGrowth); st != 201 {
+		t.Fatalf("upload do logo por Paulo falhou: %d", st)
+	}
 	if st := cliLeitor.pedir("GET", "/api/kit", nil, nil); st != 200 {
 		t.Fatalf("GET /api/kit com ver_marca_posts esperava 200, veio %d", st)
 	}
@@ -665,20 +679,26 @@ func TestEtapa2CC7AutorizacaoEIsolamento(t *testing.T) {
 	if st := cliLeitor.pedir("GET", "/api/kit/versoes/1", nil, nil); st != 200 {
 		t.Fatalf("GET /api/kit/versoes/1 com ver_marca_posts esperava 200, veio %d", st)
 	}
-	if st := cliLeitor.pedir("PUT", "/api/kit", map[string]any{"organizacaoId": growth.ID, "versaoBase": 1, "tomDeVoz": "Bloqueado"}, nil); st != 403 {
+	if st := cliLeitor.pedir("PUT", "/api/kit", map[string]any{"organizacaoId": growth.ID, "versaoBase": 2, "tomDeVoz": "Bloqueado"}, nil); st != 403 {
 		t.Fatalf("PUT /api/kit sem cmo_dna esperava 403, veio %d", st)
 	}
-	if st := cliLeitor.pedir("POST", "/api/kit/confirmar", map[string]any{"campos": []string{"tomDeVoz"}, "versaoBase": 1}, nil); st != 403 {
+	if st := cliLeitor.pedir("POST", "/api/kit/confirmar", map[string]any{"campos": []string{"tomDeVoz"}, "versaoBase": 2}, nil); st != 403 {
 		t.Fatalf("POST /api/kit/confirmar sem cmo_dna esperava 403, veio %d", st)
 	}
+	if st := cliLeitor.enviar("/api/kit/arquivos?tipo=logo&organizacaoId="+growth.ID, "bloqueado.png", pngMinimo, nil); st != 403 {
+		t.Fatalf("POST /api/kit/arquivos sem cmo_dna esperava 403, veio %d", st)
+	}
+	if st := cliLeitor.pedir("DELETE", "/api/kit/arquivos/"+logoGrowth.ID+"?organizacaoId="+growth.ID, nil, nil); st != 403 {
+		t.Fatalf("DELETE /api/kit/arquivos sem cmo_dna esperava 403, veio %d", st)
+	}
 
-	// Isolamento entre organizações: Laura Growth tem apenas versão 1; pedir versão 2 (que só existe em Laura Hub) dá 404.
-	if st := cliLeitor.pedir("GET", "/api/kit/versoes/2", nil, nil); st != 404 {
+	// Isolamento entre organizações: Laura Growth tem 2 versões (PUT + logo); pedir versão 3 dá 404.
+	if st := cliLeitor.pedir("GET", "/api/kit/versoes/3", nil, nil); st != 404 {
 		t.Fatalf("versão de outra org esperava 404, veio %d", st)
 	}
 	var versoesGrowth RespostaVersoesKit
-	if st := cliLeitor.pedir("GET", "/api/kit/versoes", nil, &versoesGrowth); st != 200 || versoesGrowth.Total != 1 {
-		t.Fatalf("Laura Growth deveria ter só 1 versão, veio %+v", versoesGrowth)
+	if st := cliLeitor.pedir("GET", "/api/kit/versoes", nil, &versoesGrowth); st != 200 || versoesGrowth.Total != 2 {
+		t.Fatalf("Laura Growth deveria ter 2 versões, veio %+v", versoesGrowth)
 	}
 	var v1Growth VersaoKit
 	if st := cliLeitor.pedir("GET", "/api/kit/versoes/1", nil, &v1Growth); st != 200 || v1Growth.Dados.TomDeVoz != "Growth v1" {
@@ -695,6 +715,273 @@ func TestEtapa2CC7AutorizacaoEIsolamento(t *testing.T) {
 	entrarComEmail(t, cliAlheia, "dona-alheia@exemplo.com")
 	if st := cliAlheia.pedir("GET", "/api/kit/versoes/1", nil, nil); st != 404 {
 		t.Fatalf("org sem versões esperava 404 para versão 1, veio %d", st)
+	}
+}
+
+func TestEtapa2CRevisaoLGPDOrigensVersao(t *testing.T) {
+	api := NovaAPI(prepararBanco(t), false, nil)
+	paulo := novoCliente(t, api)
+	sessPaulo := entrarComoPaulo(t, paulo)
+	growth := sessPaulo.Organizacoes[0]
+
+	// Outro membro com cmo_dna grava um campo para gerar a versão 1.
+	editorID := criarMembroNaOrg(t, api.banco, growth.ID, "Maria Sigilosa", "maria-lgpd@exemplo.com", "ver_marca_posts", "cmo_dna")
+	maria := novoCliente(t, api)
+	entrarComEmail(t, maria, "maria-lgpd@exemplo.com")
+
+	var r RespostaKit
+	if st := maria.pedir("PUT", "/api/kit", map[string]any{
+		"organizacaoId": growth.ID, "versaoBase": 0, "tomDeVoz": "Humano",
+	}, &r); st != 200 {
+		t.Fatalf("PUT por Maria falhou: %d", st)
+	}
+
+	// O JSONB salvo em kit_versoes.origens não deve conter o nome da pessoa (somente definidoPorId).
+	var origensBruto string
+	if err := api.banco.QueryRow(context.Background(), `
+		SELECT origens::text FROM kit_versoes WHERE organizacao_id = $1::uuid AND numero = 1`, growth.ID).Scan(&origensBruto); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(origensBruto, "Maria Sigilosa") || !strings.Contains(origensBruto, editorID) {
+		t.Fatalf("kit_versoes.origens não deve guardar nome e deve guardar UUID: %s", origensBruto)
+	}
+
+	// Enquanto Maria existe, GET /api/kit/versoes/1 resolve o nome via JOIN.
+	var v1 VersaoKit
+	if st := paulo.pedir("GET", "/api/kit/versoes/1", nil, &v1); st != 200 {
+		t.Fatalf("GET versao 1 falhou: %d", st)
+	}
+	if v1.AutorNome == nil || *v1.AutorNome != "Maria Sigilosa" ||
+		v1.Origens["tomDeVoz"].DefinidoPor == nil || *v1.Origens["tomDeVoz"].DefinidoPor != "Maria Sigilosa" {
+		t.Fatalf("esperava nome resolvido na leitura: %+v", v1)
+	}
+
+	// CHECK em kit_versoes impede autor_tipo='ia' com autor_id preenchido.
+	if _, err := api.banco.Exec(context.Background(), `
+		INSERT INTO kit_versoes (organizacao_id, numero, dados, origens, campos_alterados, autor_id, autor_tipo)
+		VALUES ($1::uuid, 99, '{}'::jsonb, '{}'::jsonb, '{}', $2::uuid, 'ia')`, growth.ID, editorID); err == nil {
+		t.Fatal("esperava falha da restrição CHECK autor_tipo <> 'ia' OR autor_id IS NULL")
+	}
+
+	// Após excluir Maria, GET /api/kit/versoes/1 devolve autorNome=null e definidoPor=null.
+	if _, err := api.banco.Exec(context.Background(), `DELETE FROM usuarios WHERE id = $1::uuid`, editorID); err != nil {
+		t.Fatal(err)
+	}
+	var v1Apos VersaoKit
+	if st := paulo.pedir("GET", "/api/kit/versoes/1", nil, &v1Apos); st != 200 {
+		t.Fatalf("GET versao 1 após exclusão falhou: %d", st)
+	}
+	if v1Apos.AutorNome != nil || v1Apos.Origens["tomDeVoz"].DefinidoPor != nil {
+		t.Fatalf("após exclusão do usuário, nomes deveriam vir null: %+v", v1Apos)
+	}
+}
+
+func TestEtapa2CRevisaoSugestoesIAConservadoraERollback(t *testing.T) {
+	api := NovaAPI(prepararBanco(t), false, nil)
+	c := novoCliente(t, api)
+	s := entrarComoPaulo(t, c)
+	growth := s.Organizacoes[0]
+
+	// Campo confirmado pelo usuário e sugestão inicial da IA.
+	if st := c.pedir("PUT", "/api/kit", map[string]any{
+		"organizacaoId": growth.ID, "versaoBase": 0, "publico": "Clínicas", "modeloNegocio": "b2b",
+	}, nil); st != 200 {
+		t.Fatal(st)
+	}
+	res1, err := api.gravarSugestoesIA(context.Background(), growth.ID, map[string]any{
+		"tomDeVoz": "Direto",
+	})
+	if err != nil || !slices.Equal(res1.Aplicados, []string{"tomDeVoz"}) || len(res1.Ignorados) != 0 {
+		t.Fatalf("primeira sugestão IA inesperada: %+v %v", res1, err)
+	}
+
+	// IA tenta sobrescrever campo confirmado ('publico', 'modeloNegocio'), repetir valor igual ('tomDeVoz') e sugerir um novo ('diferencial').
+	res2, err := api.gravarSugestoesIA(context.Background(), growth.ID, map[string]any{
+		"publico":       "Sobrescrito pela IA",
+		"modeloNegocio": "b2c",
+		"tomDeVoz":      " Direto ",
+		"diferencial":   "Atendimento ágil",
+	})
+	if err != nil {
+		t.Fatalf("segunda sugestão IA falhou: %v", err)
+	}
+	if !slices.Equal(res2.Aplicados, []string{"diferencial"}) {
+		t.Fatalf("esperava apenas diferencial aplicado, veio %+v", res2)
+	}
+	if !slices.Equal(res2.Ignorados, []string{"tomDeVoz", "publico", "modeloNegocio"}) {
+		t.Fatalf("esperava tomDeVoz/publico/modeloNegocio ignorados, veio %+v", res2)
+	}
+
+	var r RespostaKit
+	c.pedir("GET", "/api/kit", nil, &r)
+	if r.Versao != 3 || r.Kit.Publico != "Clínicas" || r.Kit.ModeloNegocio != "b2b" || r.Kit.Diferencial != "Atendimento ágil" {
+		t.Fatalf("campos confirmados foram alterados indevidamente: %+v", r)
+	}
+	if r.Origens["publico"].Origem != "confirmado" || r.Origens["modeloNegocio"].Origem != "confirmado" {
+		t.Fatalf("origens confirmadas alteradas: %+v", r.Origens)
+	}
+
+	// Se nada restar para aplicar (só confirmados e/ou inalterados), não cria versão.
+	res3, err := api.gravarSugestoesIA(context.Background(), growth.ID, map[string]any{
+		"publico":     "Outra tentativa",
+		"diferencial": "Atendimento ágil",
+	})
+	if err != nil {
+		t.Fatalf("sugestão no-op não deveria falhar: %v", err)
+	}
+	if len(res3.Aplicados) != 0 || len(res3.Ignorados) != 2 {
+		t.Fatalf("esperava nenhum aplicado e 2 ignorados, veio %+v", res3)
+	}
+	c.pedir("GET", "/api/kit", nil, &r)
+	if r.Versao != 3 {
+		t.Fatalf("não deveria criar versão quando nada foi aplicado, veio versão %d", r.Versao)
+	}
+
+	// Campo inválido ou valor inválido em gravarSugestoesIA faz rollback total (nada gravado).
+	if _, err := api.gravarSugestoesIA(context.Background(), growth.ID, map[string]any{
+		"regioes":       "São Paulo",
+		"campoInvalido": "valor",
+	}); err == nil {
+		t.Fatal("esperava erro ao passar campo inválido")
+	}
+	if _, err := api.gravarSugestoesIA(context.Background(), growth.ID, map[string]any{
+		"regioes": "São Paulo",
+		"site":    "javascript:alert(1)",
+	}); err == nil {
+		t.Fatal("esperava erro ao passar site inválido")
+	}
+	c.pedir("GET", "/api/kit", nil, &r)
+	if r.Versao != 3 || r.Kit.Regioes != "" || r.Origens["regioes"].Origem != "" {
+		t.Fatalf("rollback de gravarSugestoesIA falhou: %+v", r)
+	}
+}
+
+func TestEtapa2CRevisaoConfirmarNoOp(t *testing.T) {
+	api := NovaAPI(prepararBanco(t), false, nil)
+	paulo := novoCliente(t, api)
+	sessPaulo := entrarComoPaulo(t, paulo)
+	growth := sessPaulo.Organizacoes[0]
+
+	criarMembroNaOrg(t, api.banco, growth.ID, "Editora Ana", "ana-noop@exemplo.com", "ver_marca_posts", "cmo_dna")
+	ana := novoCliente(t, api)
+	entrarComEmail(t, ana, "ana-noop@exemplo.com")
+
+	// Paulo confirma 'publico'; IA sugere 'tomDeVoz'.
+	var r RespostaKit
+	if st := paulo.pedir("PUT", "/api/kit", map[string]any{
+		"organizacaoId": growth.ID, "versaoBase": 0, "publico": "Empresas",
+	}, &r); st != 200 {
+		t.Fatal(st)
+	}
+	emPublico := r.Origens["publico"].DefinidoEm
+	if _, err := api.gravarSugestoesIA(context.Background(), growth.ID, map[string]any{"tomDeVoz": "Direto"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Ana confirma ['publico', 'tomDeVoz']: 'publico' é no-op (autor/data de Paulo preservados), só 'tomDeVoz' muda e entra na versão.
+	if st := ana.pedir("POST", "/api/kit/confirmar", map[string]any{
+		"campos":     []string{"publico", "tomDeVoz"},
+		"versaoBase": 2,
+	}, &r); st != 200 {
+		t.Fatalf("confirmar misto falhou: %d", st)
+	}
+	if r.Versao != 3 {
+		t.Fatalf("esperava versão 3, veio %d", r.Versao)
+	}
+	if r.Origens["publico"].DefinidoPor == nil || *r.Origens["publico"].DefinidoPor != "Paulo" || !r.Origens["publico"].DefinidoEm.Equal(emPublico) {
+		t.Fatalf("campo já confirmado mudou autor/data: %+v (antes=%v)", r.Origens["publico"], emPublico)
+	}
+	if r.Origens["tomDeVoz"].DefinidoPor == nil || *r.Origens["tomDeVoz"].DefinidoPor != "Editora Ana" {
+		t.Fatalf("tomDeVoz deveria ser confirmado por Editora Ana: %+v", r.Origens["tomDeVoz"])
+	}
+	var v3 VersaoKit
+	paulo.pedir("GET", "/api/kit/versoes/3", nil, &v3)
+	if !slices.Equal(v3.CamposAlterados, []string{"tomDeVoz"}) {
+		t.Fatalf("versão 3 deveria listar apenas tomDeVoz, veio %v", v3.CamposAlterados)
+	}
+
+	// Confirmar quando todos os campos já estão confirmados -> 200 com kit atual e NENHUMA versão nova.
+	var rNoOp RespostaKit
+	if st := ana.pedir("POST", "/api/kit/confirmar", map[string]any{
+		"campos":     []string{"publico", "tomDeVoz"},
+		"versaoBase": 3,
+	}, &rNoOp); st != 200 {
+		t.Fatalf("confirmar no-op esperava 200, veio %d", st)
+	}
+	if rNoOp.Versao != 3 {
+		t.Fatalf("confirmar no-op não deveria criar versão, veio %d", rNoOp.Versao)
+	}
+}
+
+func TestEtapa2CRevisaoPaginacaoENumeroLimites(t *testing.T) {
+	api := NovaAPI(prepararBanco(t), false, nil)
+	c := novoCliente(t, api)
+	s := entrarComoPaulo(t, c)
+	growth := s.Organizacoes[0]
+
+	c.pedir("PUT", "/api/kit", map[string]any{"organizacaoId": growth.ID, "versaoBase": 0, "tomDeVoz": "Ok"}, nil)
+
+	for _, pag := range []string{"0", "-1", "abc", "1000001", "999999999999999999", "99999999999999999999999999"} {
+		st, body := c.pedirComCorpo("GET", "/api/kit/versoes?pagina="+pag, nil)
+		if st != 400 || !strings.Contains(string(body), `"dados_invalidos"`) {
+			t.Fatalf("pagina=%s esperava 400 dados_invalidos, veio %d (%s)", pag, st, string(body))
+		}
+	}
+
+	for _, num := range []string{"0", "-5", "abc", "9999999999", "99999999999999999999999999"} {
+		st, _ := c.pedirComCorpo("GET", "/api/kit/versoes/"+num, nil)
+		if st != 404 {
+			t.Fatalf("numero=%s esperava 404, veio %d", num, st)
+		}
+	}
+}
+
+func TestEtapa2CRevisaoArquivosVersoesEFalhas(t *testing.T) {
+	api := NovaAPI(prepararBanco(t), false, nil)
+	c := novoCliente(t, api)
+	s := entrarComoPaulo(t, c)
+	growth := s.Organizacoes[0]
+
+	// Upload 1: logo inicial -> v1
+	var logo1 ArquivoMarca
+	if st := c.enviar("/api/kit/arquivos?tipo=logo&organizacaoId="+growth.ID, "logo1.png", pngMinimo, &logo1); st != 201 {
+		t.Fatalf("logo1 falhou: %d", st)
+	}
+	// Upload 2: substituição de logo -> v2
+	var logo2 ArquivoMarca
+	if st := c.enviar("/api/kit/arquivos?tipo=logo&organizacaoId="+growth.ID, "logo2.png", pngMinimo, &logo2); st != 201 {
+		t.Fatalf("logo2 falhou: %d", st)
+	}
+
+	// Upload com falha (tamanho > 8 MB e formato inválido) não cria versão.
+	grande := make([]byte, maxTamanhoArquivo+10)
+	copy(grande, pngMinimo)
+	if st := c.enviar("/api/kit/arquivos?tipo=logo&organizacaoId="+growth.ID, "grande.png", grande, nil); st != 413 {
+		t.Fatalf("arquivo grande esperava 413, veio %d", st)
+	}
+	if st := c.enviar("/api/kit/arquivos?tipo=logo&organizacaoId="+growth.ID, "falso.png", []byte("texto puro"), nil); st != 415 {
+		t.Fatalf("formato inválido esperava 415, veio %d", st)
+	}
+
+	var r RespostaKit
+	c.pedir("GET", "/api/kit", nil, &r)
+	if r.Versao != 2 {
+		t.Fatalf("uploads com falha não deveriam criar versão, veio %d", r.Versao)
+	}
+
+	// Remoção de logo -> v3
+	if st := c.pedir("DELETE", "/api/kit/arquivos/"+logo2.ID+"?organizacaoId="+growth.ID, nil, nil); st != 204 {
+		t.Fatalf("remover logo2 falhou: %d", st)
+	}
+
+	var lista RespostaVersoesKit
+	if st := c.pedir("GET", "/api/kit/versoes", nil, &lista); st != 200 || lista.Total != 3 {
+		t.Fatalf("versões esperadas=3, veio %d %+v", st, lista)
+	}
+	if !slices.Equal(lista.Versoes[0].CamposAlterados, []string{"logo:logo2.png"}) ||
+		!slices.Equal(lista.Versoes[1].CamposAlterados, []string{"logo:logo2.png"}) ||
+		!slices.Equal(lista.Versoes[2].CamposAlterados, []string{"logo:logo1.png"}) {
+		t.Fatalf("camposAlterados de logo inesperados: %+v", lista.Versoes)
 	}
 }
 

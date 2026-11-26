@@ -289,13 +289,25 @@ func main() {
 			os.Exit(1)
 		}
 		agora := time.Now().UTC()
-		queryKit := fmt.Sprintf(`
-			INSERT INTO kits_marca (organizacao_id, %s, atualizado_em, atualizado_por)
-			VALUES ($1::uuid, $2, $3, NULL)
-			ON CONFLICT (organizacao_id) DO UPDATE SET
-				%s = EXCLUDED.%s,
-				atualizado_em = EXCLUDED.atualizado_em,
-				atualizado_por = NULL`, alvo.coluna, alvo.coluna, alvo.coluna)
+		var queryKit string
+		if campo == "modeloNegocio" && valor != "outro" {
+			queryKit = `
+				INSERT INTO kits_marca (organizacao_id, modelo_negocio, modelo_outro, atualizado_em, atualizado_por)
+				VALUES ($1::uuid, $2, '', $3, NULL)
+				ON CONFLICT (organizacao_id) DO UPDATE SET
+					modelo_negocio = EXCLUDED.modelo_negocio,
+					modelo_outro = '',
+					atualizado_em = EXCLUDED.atualizado_em,
+					atualizado_por = NULL`
+		} else {
+			queryKit = fmt.Sprintf(`
+				INSERT INTO kits_marca (organizacao_id, %s, atualizado_em, atualizado_por)
+				VALUES ($1::uuid, $2, $3, NULL)
+				ON CONFLICT (organizacao_id) DO UPDATE SET
+					%s = EXCLUDED.%s,
+					atualizado_em = EXCLUDED.atualizado_em,
+					atualizado_por = NULL`, alvo.coluna, alvo.coluna, alvo.coluna)
+		}
 		if _, err := tx.Exec(ctx, queryKit, orgID, valor, agora); err != nil {
 			fmt.Fprintf(os.Stderr, "erro ao atualizar kit: %v\n", err)
 			os.Exit(1)
@@ -343,12 +355,11 @@ func main() {
 							ko.campo,
 							jsonb_build_object(
 								'origem', ko.origem,
-								'definidoPor', u.nome,
+								'definidoPorId', ko.definido_por::text,
 								'definidoEm', to_jsonb(ko.definido_em)
 							)
 						)
 						FROM kit_origens ko
-						LEFT JOIN usuarios u ON u.id = ko.definido_por
 						WHERE ko.organizacao_id = k.organizacao_id
 					),
 					'{}'::jsonb
