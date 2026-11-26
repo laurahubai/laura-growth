@@ -1,4 +1,10 @@
-import type { SituacaoLimite } from "@laura-growth/contratos";
+import {
+  rotuloAlcada,
+  type Alcada,
+  type EstadoEnvioConvite,
+  type RegistroAcesso,
+  type SituacaoLimite,
+} from "@laura-growth/contratos";
 
 const fmtUsd2 = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -67,4 +73,54 @@ const PREFIXOS_IMAGEM_SEGUROS = [
 
 export function imagemDataUrlSegura(url: string): boolean {
   return PREFIXOS_IMAGEM_SEGUROS.some((p) => url.startsWith(p));
+}
+
+export function etiquetaEnvioConvite(estado: EstadoEnvioConvite): { texto: string; classe: string } {
+  if (estado === "enviado") return { texto: "Enviado", classe: "t-success" };
+  if (estado === "falhou") return { texto: "Não enviado", classe: "t-danger" };
+  return { texto: "Pendente", classe: "t-warning" };
+}
+
+const ROTULOS_ACAO_ACESSO: Record<string, string> = {
+  alcada_concedida: "Alçada concedida",
+  alcada_revogada: "Alçada revogada",
+  membro_removido: "Pessoa removida",
+  convite_criado: "Convite criado",
+  convite_reenviado: "Convite reenviado",
+  convite_revogado: "Convite cancelado",
+  convite_aceito: "Convite aceito",
+  admin_plataforma_concedido: "Administração concedida",
+  admin_plataforma_revogado: "Administração revogada",
+};
+
+export function rotuloAcaoAcesso(acao: string): string {
+  return ROTULOS_ACAO_ACESSO[acao] ?? acao;
+}
+
+function nomeAlcadaSeguro(codigo: unknown): string {
+  if (typeof codigo !== "string") return "";
+  return rotuloAlcada[codigo as Alcada] ?? codigo;
+}
+
+export function descreverDetalheAcesso(reg: RegistroAcesso): string {
+  const d = reg.detalhe ?? {};
+  if (typeof d.alcada === "string") {
+    return nomeAlcadaSeguro(d.alcada);
+  }
+  if (Array.isArray(d.alcadas) && d.alcadas.length > 0) {
+    return d.alcadas.map(nomeAlcadaSeguro).filter(Boolean).join(", ");
+  }
+  if (Array.isArray(d.alcadasAnteriores) && d.alcadasAnteriores.length > 0) {
+    return `Alçadas anteriores: ${d.alcadasAnteriores.map(nomeAlcadaSeguro).filter(Boolean).join(", ")}`;
+  }
+  if (typeof d.adminPlataforma === "boolean") {
+    return d.adminPlataforma ? "Tornou-se administrador da plataforma" : "Deixou de ser administrador da plataforma";
+  }
+  if (typeof d.envioEstado === "string") {
+    const e = d.envioEstado as EstadoEnvioConvite;
+    if (e === "enviado" || e === "falhou" || e === "pendente") {
+      return `Envio: ${etiquetaEnvioConvite(e).texto.toLowerCase()}`;
+    }
+  }
+  return "—";
 }

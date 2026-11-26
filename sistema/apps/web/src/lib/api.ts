@@ -6,25 +6,35 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArquivoMarca,
+  ConvitePublico,
   ErroApi,
   Fornecedor,
+  MembroEquipe,
   Modelo,
   OrganizacaoDetalhe,
+  PessoaMembro,
   Preco,
   RespostaAtividades,
   RespostaAvisos,
+  RespostaConviteCriado,
+  RespostaEquipeAdmin,
   RespostaExecucoes,
   RespostaFornecedores,
   RespostaKit,
   RespostaLerModelos,
   RespostaModelos,
+  RespostaPessoas,
   RespostaPrecos,
+  RespostaRegistroAcessos,
   ResultadoAtividade,
   ResultadoTeste,
   RotaAtividade,
   Sessao,
   type Atividade,
   type KitMarca,
+  type PedidoAceitarConvite,
+  type PedidoAtualizarEquipeAdmin,
+  type PedidoCriarConvite,
   type PedidoEditarFornecedor,
   type PedidoEditarModelo,
   type PedidoEntrar,
@@ -32,6 +42,7 @@ import {
   type PedidoNovoModelo,
   type PedidoNovoPreco,
   type PedidoRotaAtividade,
+  type PedidoSalvarAlcadas,
 } from "@laura-growth/contratos";
 import type { z } from "zod";
 
@@ -115,7 +126,11 @@ export function useOrganizacaoAtiva(orgId: string) {
 // o servidor recusa (409) em vez de gravar no kit de outra organização.
 
 export function useKit(orgId: string) {
-  return useQuery({ queryKey: ["org", orgId, "kit"], queryFn: () => chamar("GET", "/api/kit", RespostaKit) });
+  return useQuery({
+    queryKey: ["org", orgId, "kit"],
+    queryFn: () => chamar("GET", "/api/kit", RespostaKit),
+    retry: tentarSemBloqueio,
+  });
 }
 
 export function useSalvarKit(orgId: string) {
@@ -151,8 +166,10 @@ export const urlArquivo = (id: string, baixar = false) => `/api/kit/arquivos/${e
 
 // ---- Administração da plataforma (etapa 2A-1) ----
 
-const tentarAdmin = (n: number, e: Error) =>
-  !(e instanceof FalhaApi && (e.status === 401 || e.status === 403)) && n < 2;
+const tentarSemBloqueio = (n: number, e: Error) =>
+  !(e instanceof FalhaApi && (e.status === 401 || e.status === 403 || e.status === 404)) && n < 2;
+
+const tentarAdmin = tentarSemBloqueio;
 
 export function useAvisosAdmin(habilitado = true) {
   return useQuery({
@@ -325,5 +342,127 @@ export function useExecucoesAdmin(limite = 100) {
     queryKey: ["admin", "execucoes", limite],
     queryFn: () => chamar("GET", `/api/admin/execucoes?limite=${limite}`, RespostaExecucoes),
     retry: tentarAdmin,
+  });
+}
+
+// ---- Acessos, Pessoas e Convites (etapa 2B) ----
+
+export function usePessoas(orgId: string) {
+  return useQuery({
+    queryKey: ["org", orgId, "pessoas"],
+    queryFn: () => chamar("GET", "/api/pessoas", RespostaPessoas),
+    enabled: Boolean(orgId),
+    retry: tentarSemBloqueio,
+  });
+}
+
+export function useRegistroAcessos(orgId: string, limite = 100) {
+  return useQuery({
+    queryKey: ["org", orgId, "registro-acessos", limite],
+    queryFn: () => chamar("GET", `/api/pessoas/registro?limite=${limite}`, RespostaRegistroAcessos),
+    enabled: Boolean(orgId),
+    retry: tentarSemBloqueio,
+  });
+}
+
+export function useSalvarAlcadasPessoa(orgId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ usuarioId, alcadas }: { usuarioId: string } & PedidoSalvarAlcadas) =>
+      chamar("PUT", `/api/pessoas/${encodeURIComponent(usuarioId)}/alcadas`, PessoaMembro, { alcadas }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org", orgId, "pessoas"] });
+      qc.invalidateQueries({ queryKey: ["org", orgId, "registro-acessos"] });
+    },
+  });
+}
+
+export function useRemoverPessoa(orgId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (usuarioId: string) =>
+      chamar("DELETE", `/api/pessoas/${encodeURIComponent(usuarioId)}`, null),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org", orgId, "pessoas"] });
+      qc.invalidateQueries({ queryKey: ["org", orgId, "registro-acessos"] });
+      qc.invalidateQueries({ queryKey: ["org", orgId, "detalhe"] });
+    },
+  });
+}
+
+export function useCriarConvite(orgId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (dados: PedidoCriarConvite) =>
+      chamar("POST", "/api/convites", RespostaConviteCriado, dados),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org", orgId, "pessoas"] });
+      qc.invalidateQueries({ queryKey: ["org", orgId, "registro-acessos"] });
+    },
+  });
+}
+
+export function useReenviarConvite(orgId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      chamar("POST", `/api/convites/${encodeURIComponent(id)}/reenviar`, RespostaConviteCriado),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org", orgId, "pessoas"] });
+      qc.invalidateQueries({ queryKey: ["org", orgId, "registro-acessos"] });
+    },
+  });
+}
+
+export function useCancelarConvite(orgId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      chamar("DELETE", `/api/convites/${encodeURIComponent(id)}`, null),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["org", orgId, "pessoas"] });
+      qc.invalidateQueries({ queryKey: ["org", orgId, "registro-acessos"] });
+    },
+  });
+}
+
+export function useConvitePublico(token: string) {
+  return useQuery({
+    queryKey: ["convite", token],
+    queryFn: () => chamar("GET", `/api/convites/${encodeURIComponent(token)}`, ConvitePublico),
+    enabled: Boolean(token),
+    retry: tentarSemBloqueio,
+  });
+}
+
+export function useAceitarConvite(token: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (dados: PedidoAceitarConvite) =>
+      chamar("POST", `/api/convites/${encodeURIComponent(token)}/aceitar`, Sessao, dados),
+    onSuccess: (s) => {
+      qc.clear();
+      qc.setQueryData(CHAVE_SESSAO, s);
+    },
+  });
+}
+
+export function useEquipeAdmin() {
+  return useQuery({
+    queryKey: ["admin", "equipe"],
+    queryFn: () => chamar("GET", "/api/admin/equipe", RespostaEquipeAdmin),
+    retry: tentarAdmin,
+  });
+}
+
+export function useAtualizarEquipeAdmin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ usuarioId, dados }: { usuarioId: string; dados: PedidoAtualizarEquipeAdmin }) =>
+      chamar("PUT", `/api/admin/equipe/${encodeURIComponent(usuarioId)}`, MembroEquipe, dados),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "equipe"] });
+      qc.invalidateQueries({ queryKey: ["sessao"] });
+    },
   });
 }

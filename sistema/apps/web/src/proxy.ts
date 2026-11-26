@@ -4,8 +4,10 @@ import { NextResponse, type NextRequest } from "next/server";
 // é conferida pela API; aqui é só um atalho para não piscar a tela.
 export function proxy(request: NextRequest) {
   const temSessao = Boolean(request.cookies.get("lg_sessao")?.value);
-  const naEntrada = request.nextUrl.pathname.startsWith("/entrar");
-  if (!temSessao && !naEntrada) {
+  const caminho = request.nextUrl.pathname;
+  const rotaPublica =
+    caminho.startsWith("/entrar") || caminho === "/convite" || caminho.startsWith("/convite/");
+  if (!temSessao && !rotaPublica) {
     return NextResponse.redirect(new URL("/entrar", request.url));
   }
   return NextResponse.next();
