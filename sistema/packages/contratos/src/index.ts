@@ -1,6 +1,7 @@
 // Formato dos dados trocados entre as telas e o servidor.
 // Espelha os tipos de backend/api.go: ao mudar um, mude o outro.
 import { z } from "zod";
+import { Alcada, PapelOrganizacao } from "./acessos";
 
 export const TipoOrganizacao = z.enum(["empresa", "clinica_estetica"]);
 export type TipoOrganizacao = z.infer<typeof TipoOrganizacao>;
@@ -25,12 +26,13 @@ export const Sessao = z.object({
   usuario: Usuario,
   organizacoes: z.array(Organizacao),
   organizacaoAtiva: Organizacao,
+  alcadas: z.array(Alcada),
 });
 export type Sessao = z.infer<typeof Sessao>;
 
 export const OrganizacaoDetalhe = Organizacao.extend({
   criadaEm: z.string(),
-  papel: z.enum(["dono", "membro"]),
+  papel: PapelOrganizacao,
   membros: z.number(),
 });
 export type OrganizacaoDetalhe = z.infer<typeof OrganizacaoDetalhe>;
@@ -83,3 +85,4 @@ export const RespostaKit = z.object({ kit: KitMarca, arquivos: z.array(ArquivoMa
 export type RespostaKit = z.infer<typeof RespostaKit>;
 
 export * from "./admin";
+export * from "./acessos";
