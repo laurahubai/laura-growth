@@ -114,6 +114,8 @@ func (a *API) rotasAdmin(m *http.ServeMux) {
 	adminMux.HandleFunc("POST /api/admin/atividades/{atividade}/testar", com(a.testarAtividade))
 	adminMux.HandleFunc("GET /api/admin/execucoes", com(a.listarExecucoes))
 	adminMux.HandleFunc("GET /api/admin/avisos", com(a.listarAvisos))
+	adminMux.HandleFunc("GET /api/admin/equipe", com(a.listarEquipeAdmin))
+	adminMux.HandleFunc("PUT /api/admin/equipe/{usuarioId}", com(a.atualizarEquipeAdmin))
 
 	// Qualquer rota ou método sob /api/admin/* exige admin_plataforma antes de 404/405 (AC30).
 	despacharAdmin := a.comAdmin(func(w http.ResponseWriter, r *http.Request, s contextoSessao) {
