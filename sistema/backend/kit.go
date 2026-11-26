@@ -34,6 +34,7 @@ const (
 	maxProdutos       = 20
 	maxNomeProduto    = 500
 	versoesPorPagina  = 20
+	maxPaginaVersoes  = 1_000_000
 )
 
 const msgKitDesatualizado = "O kit foi alterado por outra pessoa. Recarregue para ver a versão atual."
@@ -80,6 +81,18 @@ type OrigemCampo struct {
 	Origem      string    `json:"origem"`
 	DefinidoPor *string   `json:"definidoPor"`
 	DefinidoEm  time.Time `json:"definidoEm"`
+}
+
+// origemVersaoDB representa o registro gravado em kit_versoes.origens (apenas UUID, sem nomes por LGPD).
+type origemVersaoDB struct {
+	Origem        string    `json:"origem"`
+	DefinidoPorID *string   `json:"definidoPorId"`
+	DefinidoEm    time.Time `json:"definidoEm"`
+}
+
+type ResultadoSugestoesIA struct {
+	Aplicados []string
+	Ignorados []string
 }
 
 type ArquivoMarca struct {
@@ -268,6 +281,30 @@ func carregarRegistroKit(ctx context.Context, q consultaKitSQL, org string) (Kit
 	return k, true, nil
 }
 
+func carregarOrigensVersaoDB(ctx context.Context, q consultaKitSQL, org string) (map[string]origemVersaoDB, error) {
+	linhas, err := q.Query(ctx, `
+		SELECT campo, origem, definido_por::text, definido_em
+		FROM kit_origens
+		WHERE organizacao_id = $1::uuid`, org)
+	if err != nil {
+		return nil, err
+	}
+	defer linhas.Close()
+	origens := map[string]origemVersaoDB{}
+	for linhas.Next() {
+		var campo string
+		var o origemVersaoDB
+		if err := linhas.Scan(&campo, &o.Origem, &o.DefinidoPorID, &o.DefinidoEm); err != nil {
+			return nil, err
+		}
+		origens[campo] = o
+	}
+	if err := linhas.Err(); err != nil {
+		return nil, err
+	}
+	return origens, nil
+}
+
 func carregarOrigensCom(ctx context.Context, q consultaKitSQL, org string) (map[string]OrigemCampo, error) {
 	linhas, err := q.Query(ctx, `
 		SELECT ko.campo, ko.origem, u.nome, ko.definido_em
@@ -419,6 +456,9 @@ func validarKit(k *KitMarca) string {
 	k.ModeloNegocio = strings.TrimSpace(k.ModeloNegocio)
 	if !modelosNegocioValidos[k.ModeloNegocio] {
 		return "Modelo de negócio inválido."
+	}
+	if k.ModeloNegocio != "outro" {
+		k.ModeloOutro = ""
 	}
 
 	var canais []string
@@ -578,10 +618,10 @@ func upsertOrigensKit(ctx context.Context, q consultaKitSQL, org string, campos 
 	return nil
 }
 
-func inserirVersaoKit(ctx context.Context, q consultaKitSQL, org string, numero int, dados DadosKitMarca, origens map[string]OrigemCampo, camposAlterados []string, autorID *string, autorTipo string, em time.Time) error {
+func inserirVersaoKit(ctx context.Context, q consultaKitSQL, org string, numero int, dados DadosKitMarca, origens map[string]origemVersaoDB, camposAlterados []string, autorID *string, autorTipo string, em time.Time) error {
 	normalizarFatiasDados(&dados)
 	if origens == nil {
-		origens = map[string]OrigemCampo{}
+		origens = map[string]origemVersaoDB{}
 	}
 	if camposAlterados == nil {
 		camposAlterados = []string{}
@@ -661,12 +701,12 @@ func (a *API) salvarKit(w http.ResponseWriter, r *http.Request, s contextoSessao
 		falhaInterna(w, err)
 		return
 	}
-	origens, err := carregarOrigensCom(r.Context(), tx, org)
+	origensDB, err := carregarOrigensVersaoDB(r.Context(), tx, org)
 	if err != nil {
 		falhaInterna(w, err)
 		return
 	}
-	if err := inserirVersaoKit(r.Context(), tx, org, versaoAtual+1, p.KitMarca.DadosKitMarca, origens, camposAlterados, &autorID, "pessoa", agora); err != nil {
+	if err := inserirVersaoKit(r.Context(), tx, org, versaoAtual+1, p.KitMarca.DadosKitMarca, origensDB, camposAlterados, &autorID, "pessoa", agora); err != nil {
 		falhaInterna(w, err)
 		return
 	}
@@ -733,6 +773,28 @@ func (a *API) confirmarCamposKit(w http.ResponseWriter, r *http.Request, s conte
 		erro(w, 409, "kit_desatualizado", msgKitDesatualizado)
 		return
 	}
+	origensAtuais, err := carregarOrigensVersaoDB(r.Context(), tx, org)
+	if err != nil {
+		falhaInterna(w, err)
+		return
+	}
+	var camposConfirmar []string
+	for _, c := range campos {
+		if origensAtuais[c].Origem == "confirmado" {
+			continue
+		}
+		camposConfirmar = append(camposConfirmar, c)
+	}
+	if len(camposConfirmar) == 0 {
+		resp, err := carregarKitCom(r.Context(), tx, org)
+		if err != nil {
+			falhaInterna(w, err)
+			return
+		}
+		responder(w, 200, resp)
+		return
+	}
+
 	k, _, err := carregarRegistroKit(r.Context(), tx, org)
 	if err != nil {
 		falhaInterna(w, err)
@@ -745,16 +807,16 @@ func (a *API) confirmarCamposKit(w http.ResponseWriter, r *http.Request, s conte
 		falhaInterna(w, err)
 		return
 	}
-	if err := upsertOrigensKit(r.Context(), tx, org, campos, "confirmado", &autorID, agora); err != nil {
+	if err := upsertOrigensKit(r.Context(), tx, org, camposConfirmar, "confirmado", &autorID, agora); err != nil {
 		falhaInterna(w, err)
 		return
 	}
-	origens, err := carregarOrigensCom(r.Context(), tx, org)
+	origensDB, err := carregarOrigensVersaoDB(r.Context(), tx, org)
 	if err != nil {
 		falhaInterna(w, err)
 		return
 	}
-	if err := inserirVersaoKit(r.Context(), tx, org, versaoAtual+1, k.DadosKitMarca, origens, campos, &autorID, "pessoa", agora); err != nil {
+	if err := inserirVersaoKit(r.Context(), tx, org, versaoAtual+1, k.DadosKitMarca, origensDB, camposConfirmar, &autorID, "pessoa", agora); err != nil {
 		falhaInterna(w, err)
 		return
 	}
@@ -770,111 +832,212 @@ func (a *API) confirmarCamposKit(w http.ResponseWriter, r *http.Request, s conte
 	responder(w, 200, resp)
 }
 
+func clonarKit(k KitMarca) KitMarca {
+	out := k
+	out.Pilares = slices.Clone(k.Pilares)
+	out.Cores = slices.Clone(k.Cores)
+	out.Produtos = slices.Clone(k.Produtos)
+	out.Canais = slices.Clone(k.Canais)
+	normalizarFatiasDados(&out.DadosKitMarca)
+	return out
+}
+
+func aplicarSugestaoNoKit(k *KitMarca, chave string, val any) (string, error) {
+	switch chave {
+	case "site", "perfis", "tomDeVoz", "publico", "temas", "nuncaDizer", "fontes", "exemplos",
+		"diferencial", "modeloNegocio", "modeloOutro", "regioes", "comoCompram",
+		"maiorDesafio", "objetivo90Dias", "canaisOutro", "restricoesSetor":
+		s, ok := val.(string)
+		if !ok {
+			return "", fmt.Errorf("campo %s exige texto", chave)
+		}
+		atribuirTextoKit(k, chave, s)
+		if chave == "modeloOutro" {
+			return "modeloNegocio", nil
+		}
+		if chave == "canaisOutro" {
+			return "canais", nil
+		}
+		return chave, nil
+	case "pilares":
+		lista, err := converterListaTexto(val, chave)
+		if err != nil {
+			return "", err
+		}
+		k.Pilares = lista
+		return chave, nil
+	case "cores":
+		lista, err := converterListaTexto(val, chave)
+		if err != nil {
+			return "", err
+		}
+		k.Cores = lista
+		return chave, nil
+	case "canais":
+		lista, err := converterListaTexto(val, chave)
+		if err != nil {
+			return "", err
+		}
+		k.Canais = lista
+		return chave, nil
+	case "produtos":
+		lista, err := converterProdutos(val)
+		if err != nil {
+			return "", err
+		}
+		k.Produtos = lista
+		return chave, nil
+	default:
+		return "", fmt.Errorf("campo inválido: %s", chave)
+	}
+}
+
 // gravarSugestoesIA grava sugestões da IA apenas pelo servidor (sem rota HTTP pública),
-// marcando os campos alterados como 'sugerido_ia' e criando uma versão com autor_tipo 'ia'.
-func (a *API) gravarSugestoesIA(ctx context.Context, org string, campos map[string]any) error {
+// ignorando campos já confirmados ou cujo valor não mudou, e criando uma versão com autor_tipo 'ia'
+// apenas se algum campo for efetivamente aplicado.
+func (a *API) gravarSugestoesIA(ctx context.Context, org string, campos map[string]any) (ResultadoSugestoesIA, error) {
 	if !uuidValido(org) {
-		return errors.New("organização inválida")
+		return ResultadoSugestoesIA{}, errors.New("organização inválida")
 	}
 	if len(campos) == 0 {
-		return errors.New("informe ao menos um campo sugerido")
+		return ResultadoSugestoesIA{}, errors.New("informe ao menos um campo sugerido")
 	}
 
 	tx, err := a.banco.Begin(ctx)
 	if err != nil {
-		return err
+		return ResultadoSugestoesIA{}, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	if err := travarOrganizacaoKit(ctx, tx, org); err != nil {
-		return err
+		return ResultadoSugestoesIA{}, err
 	}
 	versaoAtual, err := versaoAtualKit(ctx, tx, org)
 	if err != nil {
-		return err
+		return ResultadoSugestoesIA{}, err
 	}
-	k, _, err := carregarRegistroKit(ctx, tx, org)
+	anterior, _, err := carregarRegistroKit(ctx, tx, org)
 	if err != nil {
-		return err
+		return ResultadoSugestoesIA{}, err
+	}
+	origensAtuais, err := carregarOrigensVersaoDB(ctx, tx, org)
+	if err != nil {
+		return ResultadoSugestoesIA{}, err
 	}
 
-	sugeridos := map[string]bool{}
+	// Valida todas as entradas antes de decidir o que aplicar ou ignorar.
+	validacao := clonarKit(anterior)
+	tocados := map[string]bool{}
 	for chave, val := range campos {
-		switch chave {
-		case "site", "perfis", "tomDeVoz", "publico", "temas", "nuncaDizer", "fontes", "exemplos",
-			"diferencial", "modeloNegocio", "modeloOutro", "regioes", "comoCompram",
-			"maiorDesafio", "objetivo90Dias", "canaisOutro", "restricoesSetor":
-			s, ok := val.(string)
-			if !ok {
-				return fmt.Errorf("campo %s exige texto", chave)
-			}
-			atribuirTextoKit(&k, chave, s)
-			if chave == "modeloOutro" {
-				sugeridos["modeloNegocio"] = true
-			} else if chave == "canaisOutro" {
-				sugeridos["canais"] = true
-			} else {
-				sugeridos[chave] = true
-			}
+		campoOrigem, err := aplicarSugestaoNoKit(&validacao, chave, val)
+		if err != nil {
+			return ResultadoSugestoesIA{}, err
+		}
+		tocados[campoOrigem] = true
+	}
+	if msg := validarKit(&validacao); msg != "" {
+		return ResultadoSugestoesIA{}, errors.New(msg)
+	}
+
+	novo := clonarKit(anterior)
+	confirmadosIgnorados := map[string]bool{}
+	for chave, val := range campos {
+		campoOrigem, _ := aplicarSugestaoNoKit(&novo, chave, val)
+		if origensAtuais[campoOrigem].Origem == "confirmado" {
+			confirmadosIgnorados[campoOrigem] = true
+		}
+	}
+	// Restaura campos já confirmados para garantir que nunca sejam sobrescritos.
+	if confirmadosIgnorados["modeloNegocio"] {
+		novo.ModeloNegocio = anterior.ModeloNegocio
+		novo.ModeloOutro = anterior.ModeloOutro
+	}
+	if confirmadosIgnorados["canais"] {
+		novo.Canais = slices.Clone(anterior.Canais)
+		novo.CanaisOutro = anterior.CanaisOutro
+	}
+	for c := range confirmadosIgnorados {
+		switch c {
+		case "site":
+			novo.Site = anterior.Site
+		case "perfis":
+			novo.Perfis = anterior.Perfis
+		case "tomDeVoz":
+			novo.TomDeVoz = anterior.TomDeVoz
+		case "publico":
+			novo.Publico = anterior.Publico
+		case "temas":
+			novo.Temas = anterior.Temas
+		case "nuncaDizer":
+			novo.NuncaDizer = anterior.NuncaDizer
+		case "fontes":
+			novo.Fontes = anterior.Fontes
+		case "exemplos":
+			novo.Exemplos = anterior.Exemplos
 		case "pilares":
-			lista, err := converterListaTexto(val, chave)
-			if err != nil {
-				return err
-			}
-			k.Pilares = lista
-			sugeridos[chave] = true
+			novo.Pilares = slices.Clone(anterior.Pilares)
 		case "cores":
-			lista, err := converterListaTexto(val, chave)
-			if err != nil {
-				return err
-			}
-			k.Cores = lista
-			sugeridos[chave] = true
-		case "canais":
-			lista, err := converterListaTexto(val, chave)
-			if err != nil {
-				return err
-			}
-			k.Canais = lista
-			sugeridos[chave] = true
+			novo.Cores = slices.Clone(anterior.Cores)
 		case "produtos":
-			lista, err := converterProdutos(val)
-			if err != nil {
-				return err
-			}
-			k.Produtos = lista
-			sugeridos[chave] = true
-		default:
-			return fmt.Errorf("campo inválido: %s", chave)
+			novo.Produtos = slices.Clone(anterior.Produtos)
+		case "diferencial":
+			novo.Diferencial = anterior.Diferencial
+		case "regioes":
+			novo.Regioes = anterior.Regioes
+		case "comoCompram":
+			novo.ComoCompram = anterior.ComoCompram
+		case "maiorDesafio":
+			novo.MaiorDesafio = anterior.MaiorDesafio
+		case "objetivo90Dias":
+			novo.Objetivo90Dias = anterior.Objetivo90Dias
+		case "restricoesSetor":
+			novo.RestricoesSetor = anterior.RestricoesSetor
 		}
 	}
-
-	if msg := validarKit(&k); msg != "" {
-		return errors.New(msg)
+	if msg := validarKit(&novo); msg != "" {
+		return ResultadoSugestoesIA{}, errors.New(msg)
 	}
 
-	var camposAlterados []string
+	alteradosSet := map[string]bool{}
+	for _, c := range detectarCamposAlterados(anterior, novo) {
+		alteradosSet[c] = true
+	}
+
+	aplicados := []string{}
+	ignorados := []string{}
 	for _, c := range camposKitOrdenados {
-		if sugeridos[c] {
-			camposAlterados = append(camposAlterados, c)
+		if !tocados[c] {
+			continue
 		}
+		if confirmadosIgnorados[c] || !alteradosSet[c] {
+			ignorados = append(ignorados, c)
+			continue
+		}
+		aplicados = append(aplicados, c)
+	}
+
+	if len(aplicados) == 0 {
+		return ResultadoSugestoesIA{Aplicados: []string{}, Ignorados: ignorados}, nil
 	}
 
 	agora := a.agora().UTC()
-	if err := gravarRegistroKit(ctx, tx, org, &k, nil, agora); err != nil {
-		return err
+	if err := gravarRegistroKit(ctx, tx, org, &novo, nil, agora); err != nil {
+		return ResultadoSugestoesIA{}, err
 	}
-	if err := upsertOrigensKit(ctx, tx, org, camposAlterados, "sugerido_ia", nil, agora); err != nil {
-		return err
+	if err := upsertOrigensKit(ctx, tx, org, aplicados, "sugerido_ia", nil, agora); err != nil {
+		return ResultadoSugestoesIA{}, err
 	}
-	origens, err := carregarOrigensCom(ctx, tx, org)
+	origensDB, err := carregarOrigensVersaoDB(ctx, tx, org)
 	if err != nil {
-		return err
+		return ResultadoSugestoesIA{}, err
 	}
-	if err := inserirVersaoKit(ctx, tx, org, versaoAtual+1, k.DadosKitMarca, origens, camposAlterados, nil, "ia", agora); err != nil {
-		return err
+	if err := inserirVersaoKit(ctx, tx, org, versaoAtual+1, novo.DadosKitMarca, origensDB, aplicados, nil, "ia", agora); err != nil {
+		return ResultadoSugestoesIA{}, err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return ResultadoSugestoesIA{}, err
+	}
+	return ResultadoSugestoesIA{Aplicados: aplicados, Ignorados: ignorados}, nil
 }
 
 func atribuirTextoKit(k *KitMarca, campo, valor string) {
@@ -964,7 +1127,7 @@ func (a *API) listarVersoesKit(w http.ResponseWriter, r *http.Request, s context
 	pagina := 1
 	if pStr := strings.TrimSpace(r.URL.Query().Get("pagina")); pStr != "" {
 		n, err := strconv.Atoi(pStr)
-		if err != nil || n < 1 {
+		if err != nil || n < 1 || n > maxPaginaVersoes {
 			erro(w, 400, "dados_invalidos", "Página inválida.")
 			return
 		}
@@ -1019,11 +1182,12 @@ func (a *API) verVersaoKit(w http.ResponseWriter, r *http.Request, s contextoSes
 	if !ok {
 		return
 	}
-	numero, err := strconv.Atoi(r.PathValue("numero"))
-	if err != nil || numero < 1 {
+	n, err := strconv.ParseInt(r.PathValue("numero"), 10, 32)
+	if err != nil || n < 1 {
 		erro(w, 404, "nao_encontrado", "Versão não encontrada.")
 		return
 	}
+	numero := int(n)
 
 	var v VersaoKit
 	var dadosJSON, origensJSON []byte
@@ -1046,12 +1210,54 @@ func (a *API) verVersaoKit(w http.ResponseWriter, r *http.Request, s contextoSes
 		return
 	}
 	normalizarFatiasDados(&v.Dados)
-	if err := json.Unmarshal(origensJSON, &v.Origens); err != nil {
+	var origensDB map[string]origemVersaoDB
+	if err := json.Unmarshal(origensJSON, &origensDB); err != nil {
 		falhaInterna(w, err)
 		return
 	}
-	if v.Origens == nil {
-		v.Origens = map[string]OrigemCampo{}
+	ids := make([]string, 0, len(origensDB))
+	vistosID := map[string]bool{}
+	for _, o := range origensDB {
+		if o.DefinidoPorID != nil && uuidValido(*o.DefinidoPorID) && !vistosID[*o.DefinidoPorID] {
+			vistosID[*o.DefinidoPorID] = true
+			ids = append(ids, *o.DefinidoPorID)
+		}
+	}
+	nomesPorID := map[string]string{}
+	if len(ids) > 0 {
+		linhasNomes, err := a.banco.Query(r.Context(), `SELECT id::text, nome FROM usuarios WHERE id = ANY($1::uuid[])`, ids)
+		if err != nil {
+			falhaInterna(w, err)
+			return
+		}
+		defer linhasNomes.Close()
+		for linhasNomes.Next() {
+			var id, nome string
+			if err := linhasNomes.Scan(&id, &nome); err != nil {
+				falhaInterna(w, err)
+				return
+			}
+			nomesPorID[id] = nome
+		}
+		if err := linhasNomes.Err(); err != nil {
+			falhaInterna(w, err)
+			return
+		}
+	}
+	v.Origens = make(map[string]OrigemCampo, len(origensDB))
+	for campo, o := range origensDB {
+		var definidoPor *string
+		if o.DefinidoPorID != nil {
+			if nome, ok := nomesPorID[*o.DefinidoPorID]; ok {
+				n := nome
+				definidoPor = &n
+			}
+		}
+		v.Origens[campo] = OrigemCampo{
+			Origem:      o.Origem,
+			DefinidoPor: definidoPor,
+			DefinidoEm:  o.DefinidoEm,
+		}
 	}
 	if v.CamposAlterados == nil {
 		v.CamposAlterados = []string{}
@@ -1084,11 +1290,11 @@ func (a *API) registrarVersaoArquivo(ctx context.Context, tx pgx.Tx, org, autorI
 	if err := gravarRegistroKit(ctx, tx, org, &k, &autorID, em); err != nil {
 		return err
 	}
-	origens, err := carregarOrigensCom(ctx, tx, org)
+	origensDB, err := carregarOrigensVersaoDB(ctx, tx, org)
 	if err != nil {
 		return err
 	}
-	return inserirVersaoKit(ctx, tx, org, versaoAtual+1, k.DadosKitMarca, origens, []string{campoAlteradoArquivo(tipo, nome)}, &autorID, "pessoa", em)
+	return inserirVersaoKit(ctx, tx, org, versaoAtual+1, k.DadosKitMarca, origensDB, []string{campoAlteradoArquivo(tipo, nome)}, &autorID, "pessoa", em)
 }
 
 func (a *API) enviarArquivo(w http.ResponseWriter, r *http.Request, s contextoSessao) {

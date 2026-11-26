@@ -62,7 +62,8 @@ CREATE TABLE kit_versoes (
   autor_id          uuid REFERENCES usuarios (id) ON DELETE SET NULL,
   autor_tipo        text NOT NULL CHECK (autor_tipo IN ('pessoa', 'ia')),
   criado_em         timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (organizacao_id, numero)
+  UNIQUE (organizacao_id, numero),
+  CHECK (autor_tipo <> 'ia' OR autor_id IS NULL)
 );
 CREATE INDEX kit_versoes_org_numero ON kit_versoes (organizacao_id, numero DESC);
 
@@ -120,12 +121,11 @@ SELECT
         ko.campo,
         jsonb_build_object(
           'origem', ko.origem,
-          'definidoPor', u.nome,
+          'definidoPorId', ko.definido_por::text,
           'definidoEm', to_jsonb(ko.definido_em)
         )
       )
       FROM kit_origens ko
-      LEFT JOIN usuarios u ON u.id = ko.definido_por
       WHERE ko.organizacao_id = k.organizacao_id
     ),
     '{}'::jsonb
