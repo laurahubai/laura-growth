@@ -127,7 +127,7 @@ export function useOrganizacaoAtiva(orgId: string) {
 
 // ---- Kit de marca (etapas 2 e 2C) ----
 
-export type PedidoSalvarKit = Omit<KitMarca, "organizacaoId" | "atualizadoEm"> & {
+export type PedidoSalvarKit = Omit<KitMarca, "atualizadoEm"> & {
   versaoBase: number;
 };
 

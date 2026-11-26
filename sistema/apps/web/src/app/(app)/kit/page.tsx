@@ -188,6 +188,7 @@ export default function Kit() {
           confirmar.reset();
           const envio = {
             ...r,
+            organizacaoId: kitServidor.organizacaoId,
             modeloOutro: r.modeloNegocio === "outro" ? r.modeloOutro : "",
             versaoBase,
           };

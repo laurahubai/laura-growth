@@ -135,7 +135,7 @@ test("C2, C3, C4, C5, C7: DNA da marca — O que evitar no topo, novos campos, o
     await expect(pageDono.getByTestId("versao-campo-canais")).toContainText("Podcast mensal");
     await expect(pageDono.getByRole("button", { name: "Salvar kit de marca" })).toHaveCount(0);
     await expect(pageDono.getByRole("button", { name: "Confirmar" })).toHaveCount(0);
-    await expect(pageDono.locator("input, textarea, select")).toHaveCount(0);
+    await expect(pageDono.getByRole("main").locator("input, textarea, select")).toHaveCount(0);
 
     // Versão 1 ainda mostra o estado anterior (sem Diferencial).
     await pageDono.getByRole("link", { name: "Voltar para versões" }).click();
@@ -214,9 +214,11 @@ test("C2, C3, C4, C5, C7: DNA da marca — O que evitar no topo, novos campos, o
     const campoObjetivo = pageDono.getByLabel("Objetivo dos próximos 90 dias");
     await campoObjetivo.fill("Texto digitado antes do conflito");
     await pageDono.getByRole("button", { name: "Salvar kit de marca" }).click();
-    await expect(pageDono.getByRole("alert")).toContainText(
-      "O kit foi alterado por outra pessoa. Recarregue para ver a versão atual.",
-    );
+    await expect(
+      pageDono
+        .getByRole("alert")
+        .filter({ hasText: "O kit foi alterado por outra pessoa. Recarregue para ver a versão atual." }),
+    ).toBeVisible();
     await expect(campoObjetivo).toHaveValue("Texto digitado antes do conflito");
 
     await ctxDono.close();
