@@ -62,7 +62,6 @@ export default function Kit() {
   const [versaoBase, setVersaoBase] = useState(0);
   const [alterado, setAlterado] = useState(false);
   const [confirmandoCampo, setConfirmandoCampo] = useState<CampoKit | null>(null);
-  const sincronizarVersaoRef = useRef(false);
   // Índice do item recém-adicionado, para levar o cursor até ele.
   const [focar, setFocar] = useState<{ lista: "pilares" | "cores" | "produtos"; i: number } | null>(null);
   // Cores com código digitado inválido (bloqueiam o salvar) e versão para recriar os campos ao remover uma cor.
@@ -70,16 +69,10 @@ export default function Kit() {
   const [versaoCores, setVersaoCores] = useState(0);
 
   useEffect(() => {
-    if (!kit.data) return;
-    if (!alterado) {
-      const { organizacaoId: _org, atualizadoEm: _at, ...resto } = kit.data.kit;
-      setR(resto);
-      setVersaoBase(kit.data.versao);
-      sincronizarVersaoRef.current = false;
-    } else if (sincronizarVersaoRef.current) {
-      setVersaoBase(kit.data.versao);
-      sincronizarVersaoRef.current = false;
-    }
+    if (!kit.data || alterado) return;
+    const { organizacaoId: _org, atualizadoEm: _at, ...resto } = kit.data.kit;
+    setR(resto);
+    setVersaoBase(kit.data.versao);
   }, [kit.data, alterado]);
 
   if (!sessao) return null;
@@ -111,7 +104,7 @@ export default function Kit() {
     setConfirmandoCampo(campo);
     salvar.reset();
     confirmar.mutate(
-      { campos: [campo], versaoBase },
+      { organizacaoId: kitServidor.organizacaoId, campos: [campo], versaoBase },
       {
         onSuccess: (resp) => {
           setVersaoBase(resp.versao);
@@ -177,7 +170,7 @@ export default function Kit() {
         </div>
       )}
 
-      <BlocoOQueEvitar nuncaDizer={r.nuncaDizer} restricoesSetor={r.restricoesSetor} />
+      <BlocoOQueEvitar nuncaDizer={kitServidor.nuncaDizer} restricoesSetor={kitServidor.restricoesSetor} />
 
       <form
         className="stack"
@@ -574,7 +567,8 @@ export default function Kit() {
               inicial={sessao.organizacaoAtiva.nome[0]}
               podeEditar={podeEditar}
               onArquivoAlterado={() => {
-                sincronizarVersaoRef.current = true;
+                // Só absorve o +1 gerado por esta ação de arquivo; mudanças de outra pessoa seguem dando 409.
+                setVersaoBase((v) => v + 1);
               }}
             />
           </div>

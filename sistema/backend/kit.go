@@ -117,8 +117,9 @@ type pedidoSalvarKit struct {
 }
 
 type PedidoConfirmarKit struct {
-	Campos     []string `json:"campos"`
-	VersaoBase int      `json:"versaoBase"`
+	OrganizacaoID string   `json:"organizacaoId"`
+	Campos        []string `json:"campos"`
+	VersaoBase    int      `json:"versaoBase"`
 }
 
 type ResumoVersaoKit struct {
@@ -641,6 +642,14 @@ func inserirVersaoKit(ctx context.Context, q consultaKitSQL, org string, numero 
 	return err
 }
 
+func validarOrganizacaoPedido(w http.ResponseWriter, pedidoOrg, orgAtiva string) bool {
+	if pedidoOrg != orgAtiva {
+		erro(w, 409, "organizacao_trocada", "A organização ativa mudou. Recarregue a página antes de salvar.")
+		return false
+	}
+	return true
+}
+
 func (a *API) salvarKit(w http.ResponseWriter, r *http.Request, s contextoSessao) {
 	org, ok := a.autorizarAlcada(w, r, s, "cmo_dna")
 	if !ok {
@@ -650,8 +659,7 @@ func (a *API) salvarKit(w http.ResponseWriter, r *http.Request, s contextoSessao
 	if !lerJSON(w, r, &p) {
 		return
 	}
-	if p.OrganizacaoID != org {
-		erro(w, 409, "organizacao_trocada", "A organização ativa mudou. Recarregue a página antes de salvar.")
+	if !validarOrganizacaoPedido(w, p.OrganizacaoID, org) {
 		return
 	}
 	if p.VersaoBase < 0 {
@@ -729,6 +737,9 @@ func (a *API) confirmarCamposKit(w http.ResponseWriter, r *http.Request, s conte
 	}
 	var p PedidoConfirmarKit
 	if !lerJSON(w, r, &p) {
+		return
+	}
+	if !validarOrganizacaoPedido(w, p.OrganizacaoID, org) {
 		return
 	}
 	if p.VersaoBase < 0 {

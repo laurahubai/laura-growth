@@ -155,8 +155,12 @@ export type RespostaKit = z.infer<typeof RespostaKit>;
 // Resposta 200 = RespostaKit. 409 codigo "kit_desatualizado" quando versaoBase != versão atual,
 // mensagem "O kit foi alterado por outra pessoa. Recarregue para ver a versão atual."
 // 400 codigo "dados_invalidos" para modelo/canal inválido ou tamanho excedido.
-// POST /api/kit/confirmar: PedidoConfirmarKit -> 200 RespostaKit (mesmo 409).
-export const PedidoConfirmarKit = z.object({ campos: z.array(CampoKit).min(1), versaoBase: z.number() });
+// POST /api/kit/confirmar: PedidoConfirmarKit -> 200 RespostaKit (mesmo 409 organizacao_trocada / kit_desatualizado).
+export const PedidoConfirmarKit = z.object({
+  organizacaoId: z.string(),
+  campos: z.array(CampoKit).min(1),
+  versaoBase: z.number(),
+});
 export type PedidoConfirmarKit = z.infer<typeof PedidoConfirmarKit>;
 
 export const ResumoVersaoKit = z.object({

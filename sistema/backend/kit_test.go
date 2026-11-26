@@ -316,8 +316,9 @@ func TestEtapa2CC3OrigensEConfirmacao(t *testing.T) {
 
 	// POST /api/kit/confirmar transforma sugestões escolhidas em confirmado e registra versão.
 	if st := c.pedir("POST", "/api/kit/confirmar", map[string]any{
-		"campos":     []string{"tomDeVoz", "produtos"},
-		"versaoBase": r.Versao,
+		"organizacaoId": growth.ID,
+		"campos":        []string{"tomDeVoz", "produtos"},
+		"versaoBase":    r.Versao,
 	}, &r); st != 200 {
 		t.Fatalf("POST /api/kit/confirmar falhou: %d", st)
 	}
@@ -332,10 +333,10 @@ func TestEtapa2CC3OrigensEConfirmacao(t *testing.T) {
 	}
 
 	// Confirmar com lista vazia ou campo inválido -> 400 dados_invalidos.
-	if st, body := c.pedirComCorpo("POST", "/api/kit/confirmar", map[string]any{"campos": []string{}, "versaoBase": r.Versao}); st != 400 || !strings.Contains(string(body), `"dados_invalidos"`) {
+	if st, body := c.pedirComCorpo("POST", "/api/kit/confirmar", map[string]any{"organizacaoId": growth.ID, "campos": []string{}, "versaoBase": r.Versao}); st != 400 || !strings.Contains(string(body), `"dados_invalidos"`) {
 		t.Fatalf("confirmar vazio esperava 400 dados_invalidos, veio %d (%s)", st, string(body))
 	}
-	if st, body := c.pedirComCorpo("POST", "/api/kit/confirmar", map[string]any{"campos": []string{"campoInexistente"}, "versaoBase": r.Versao}); st != 400 || !strings.Contains(string(body), `"dados_invalidos"`) {
+	if st, body := c.pedirComCorpo("POST", "/api/kit/confirmar", map[string]any{"organizacaoId": growth.ID, "campos": []string{"campoInexistente"}, "versaoBase": r.Versao}); st != 400 || !strings.Contains(string(body), `"dados_invalidos"`) {
 		t.Fatalf("confirmar campo inválido esperava 400 dados_invalidos, veio %d (%s)", st, string(body))
 	}
 }
@@ -362,7 +363,7 @@ func TestEtapa2CC4VersoesEHistorico(t *testing.T) {
 		t.Fatalf("esperava versão 2, veio %d", r.Versao)
 	}
 	// Versão 3: confirmar
-	if st := c.pedir("POST", "/api/kit/confirmar", map[string]any{"campos": []string{"diferencial"}, "versaoBase": 2}, &r); st != 200 || r.Versao != 3 {
+	if st := c.pedir("POST", "/api/kit/confirmar", map[string]any{"organizacaoId": growth.ID, "campos": []string{"diferencial"}, "versaoBase": 2}, &r); st != 200 || r.Versao != 3 {
 		t.Fatalf("v3 confirmar falhou: %d %+v", st, r.Versao)
 	}
 	// Versão 4: upload logo
@@ -462,9 +463,17 @@ func TestEtapa2CC5ConcorrenciaVersao(t *testing.T) {
 		t.Fatalf("PUT desatualizado esperava 409 kit_desatualizado, veio %d (%s)", st, string(body))
 	}
 
+	// Confirmar com organizacaoId de outra organização -> 409 organizacao_trocada, nada gravado.
+	st, body = c.pedirComCorpo("POST", "/api/kit/confirmar", map[string]any{
+		"organizacaoId": s.Organizacoes[1].ID, "campos": []string{"diferencial"}, "versaoBase": 2,
+	})
+	if st != 409 || !strings.Contains(string(body), `"organizacao_trocada"`) {
+		t.Fatalf("confirmar com outra org esperava 409 organizacao_trocada, veio %d (%s)", st, string(body))
+	}
+
 	// Confirmar com versaoBase desatualizada -> 409 kit_desatualizado, origem continua sugerido_ia.
 	st, body = c.pedirComCorpo("POST", "/api/kit/confirmar", map[string]any{
-		"campos": []string{"diferencial"}, "versaoBase": 1,
+		"organizacaoId": growth.ID, "campos": []string{"diferencial"}, "versaoBase": 1,
 	})
 	if st != 409 || !strings.Contains(string(body), `"kit_desatualizado"`) {
 		t.Fatalf("confirmar desatualizado esperava 409 kit_desatualizado, veio %d (%s)", st, string(body))
@@ -682,7 +691,7 @@ func TestEtapa2CC7AutorizacaoEIsolamento(t *testing.T) {
 	if st := cliLeitor.pedir("PUT", "/api/kit", map[string]any{"organizacaoId": growth.ID, "versaoBase": 2, "tomDeVoz": "Bloqueado"}, nil); st != 403 {
 		t.Fatalf("PUT /api/kit sem cmo_dna esperava 403, veio %d", st)
 	}
-	if st := cliLeitor.pedir("POST", "/api/kit/confirmar", map[string]any{"campos": []string{"tomDeVoz"}, "versaoBase": 2}, nil); st != 403 {
+	if st := cliLeitor.pedir("POST", "/api/kit/confirmar", map[string]any{"organizacaoId": growth.ID, "campos": []string{"tomDeVoz"}, "versaoBase": 2}, nil); st != 403 {
 		t.Fatalf("POST /api/kit/confirmar sem cmo_dna esperava 403, veio %d", st)
 	}
 	if st := cliLeitor.enviar("/api/kit/arquivos?tipo=logo&organizacaoId="+growth.ID, "bloqueado.png", pngMinimo, nil); st != 403 {
@@ -880,8 +889,9 @@ func TestEtapa2CRevisaoConfirmarNoOp(t *testing.T) {
 
 	// Ana confirma ['publico', 'tomDeVoz']: 'publico' é no-op (autor/data de Paulo preservados), só 'tomDeVoz' muda e entra na versão.
 	if st := ana.pedir("POST", "/api/kit/confirmar", map[string]any{
-		"campos":     []string{"publico", "tomDeVoz"},
-		"versaoBase": 2,
+		"organizacaoId": growth.ID,
+		"campos":        []string{"publico", "tomDeVoz"},
+		"versaoBase":    2,
 	}, &r); st != 200 {
 		t.Fatalf("confirmar misto falhou: %d", st)
 	}
@@ -903,8 +913,9 @@ func TestEtapa2CRevisaoConfirmarNoOp(t *testing.T) {
 	// Confirmar quando todos os campos já estão confirmados -> 200 com kit atual e NENHUMA versão nova.
 	var rNoOp RespostaKit
 	if st := ana.pedir("POST", "/api/kit/confirmar", map[string]any{
-		"campos":     []string{"publico", "tomDeVoz"},
-		"versaoBase": 3,
+		"organizacaoId": growth.ID,
+		"campos":        []string{"publico", "tomDeVoz"},
+		"versaoBase":    3,
 	}, &rNoOp); st != 200 {
 		t.Fatalf("confirmar no-op esperava 200, veio %d", st)
 	}

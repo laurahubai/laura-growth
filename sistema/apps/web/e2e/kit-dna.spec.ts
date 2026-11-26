@@ -173,7 +173,7 @@ test("C2, C3, C4, C5, C7: DNA da marca — O que evitar no topo, novos campos, o
     expect(resPutSemAlc.status()).toBe(403);
 
     const resConfirmSemAlc = await pageLeitura.request.post("/api/kit/confirmar", {
-      data: { campos: ["regioes"], versaoBase: 1 },
+      data: { organizacaoId: "00000000-0000-0000-0000-000000000000", campos: ["regioes"], versaoBase: 1 },
     });
     expect(resConfirmSemAlc.status()).toBe(403);
 
@@ -186,6 +186,15 @@ test("C2, C3, C4, C5, C7: DNA da marca — O que evitar no topo, novos campos, o
     const resVersao404 = await pageLeitura.request.get("/api/kit/versoes/999");
     expect(resVersao404.status()).toBe(404);
     await ctxLeitura.close();
+
+    // C3 (edição humana sobre sugestão): editar campo sugerido pela IA e salvar transforma o selo em "Confirmado por você".
+    const campoRegioes = pageDono.getByTestId("campo-regioes");
+    await expect(campoRegioes).toContainText("Sugerido pela IA");
+    await pageDono.getByLabel("Regiões e idiomas").fill("Brasil e América Latina (editado)");
+    await pageDono.getByRole("button", { name: "Salvar kit de marca" }).click();
+    await expect(pageDono.getByRole("status")).toContainText("Kit salvo.");
+    await expect(campoRegioes).toContainText("Confirmado por você");
+    await expect(campoRegioes.getByRole("button", { name: "Confirmar" })).toHaveCount(0);
 
     // Pessoa sem ver_marca_posts é bloqueada nas telas e rotas (403).
     const ctxSemAcesso = await browser.newContext();

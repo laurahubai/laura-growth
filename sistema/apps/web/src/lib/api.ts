@@ -126,6 +126,8 @@ export function useOrganizacaoAtiva(orgId: string) {
 }
 
 // ---- Kit de marca (etapas 2 e 2C) ----
+// As gravações levam a organização que a tela mostra; se ela não for mais a ativa,
+// o servidor recusa (409) em vez de gravar no kit de outra organização.
 
 export type PedidoSalvarKit = Omit<KitMarca, "atualizadoEm"> & {
   versaoBase: number;
@@ -155,8 +157,13 @@ export function useSalvarKit(orgId: string) {
 export function useConfirmarKit(orgId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (dados: PedidoConfirmarKit) =>
-      chamar("POST", "/api/kit/confirmar", RespostaKit, PedidoConfirmarKit.parse(dados)),
+    mutationFn: (dados: Omit<PedidoConfirmarKit, "organizacaoId"> & { organizacaoId?: string }) =>
+      chamar(
+        "POST",
+        "/api/kit/confirmar",
+        RespostaKit,
+        PedidoConfirmarKit.parse({ ...dados, organizacaoId: dados.organizacaoId ?? orgId }),
+      ),
     onSuccess: (r) => {
       qc.setQueryData(["org", orgId, "kit"], r);
       qc.invalidateQueries({ queryKey: ["org", orgId, "kit-versoes"] });
