@@ -23,6 +23,7 @@ const (
 	limiteEnviosPorHora      = 20
 	tamanhoTokenConviteBytes = 32
 	maxNomeConviteRunas      = 200
+	maxNomeOrgEmailRunas     = 120
 )
 
 // ---- Formato das respostas (espelha packages/contratos/src/acessos.ts) ----
@@ -113,18 +114,32 @@ func mascararEmail(email string) string {
 	return prefixo + "***@" + partes[1]
 }
 
-func limparLinhaTexto(s string) string {
-	s = strings.ReplaceAll(s, "\r", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	return strings.TrimSpace(s)
+func limparLinhaTexto(s string, maxRunas int) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			b.WriteByte(' ')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	limpo := strings.TrimSpace(b.String())
+	if maxRunas > 0 {
+		runas := []rune(limpo)
+		if len(runas) > maxRunas {
+			limpo = strings.TrimSpace(string(runas[:maxRunas]))
+		}
+	}
+	return limpo
 }
 
-func (a *API) montarLinkConvite(token string) string {
+func (a *API) montarLinkConvite(token string) (link string, configurado bool) {
 	base := strings.TrimRight(strings.TrimSpace(a.enderecoPublico), "/")
 	if base == "" {
-		return "/convite/" + token
+		return "/convite/" + token, false
 	}
-	return base + "/convite/" + token
+	return base + "/convite/" + token, true
 }
 
 func (a *API) emailJaMembroNaOrg(ctx context.Context, q executorSQL, org, email string) (bool, error) {
@@ -154,9 +169,14 @@ func (a *API) verificarLimiteEnviosHora(ctx context.Context, q executorSQL, org 
 	return envios < limiteEnviosPorHora, nil
 }
 
-func (a *API) enviarEmailConvite(ctx context.Context, orgID, conviteID, para, orgNome, link string) (estado string, mensagem *string) {
-	nomeOrgLimpo := limparLinhaTexto(orgNome)
-	assunto := fmt.Sprintf("Convite para %s na Laura Growth", nomeOrgLimpo)
+func (a *API) enviarEmailConvite(ctx context.Context, orgID, conviteID, para, orgNome, link string, linkConfigurado bool) (estado string, mensagem *string) {
+	if !linkConfigurado {
+		msg := "O endereço público da plataforma (LG_ENDERECO_PUBLICO) não está configurado para envio por e-mail. Copie o link abaixo para enviar manualmente."
+		return "falhou", &msg
+	}
+
+	nomeOrgLimpo := limparLinhaTexto(orgNome, maxNomeOrgEmailRunas)
+	assunto := limparLinhaTexto(fmt.Sprintf("Convite para %s na Laura Growth", nomeOrgLimpo), 0)
 	texto := fmt.Sprintf(
 		"Olá,\n\nVocê recebeu um convite para acessar a organização %s na Plataforma Laura Growth.\n\n"+
 			"Para aceitar o convite, acesse o link abaixo (válido por 7 dias e de uso único):\n%s\n\n"+
@@ -186,7 +206,7 @@ func (a *API) enviarEmailConvite(ctx context.Context, orgID, conviteID, para, or
 	return "falhou", &msg
 }
 
-func (a *API) atualizarEstadoEnvioConvite(conviteID string, tokenHash []byte, estado string) {
+func (a *API) atualizarEstadoEnvioConvite(conviteID string, tokenHash []byte, estado string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := a.banco.Exec(ctx, `
@@ -198,7 +218,46 @@ func (a *API) atualizarEstadoEnvioConvite(conviteID string, tokenHash []byte, es
 		  AND revogado_em IS NULL`,
 		estado, conviteID, tokenHash); err != nil {
 		slog.Warn("falha ao atualizar estado de envio do convite", "conviteId", conviteID, "erro", err)
+		return "pendente"
 	}
+	return estado
+}
+
+func revogarConvitesPendentesDoCriador(ctx context.Context, tx pgx.Tx, orgID, atorID, criadorID, motivo string, agora time.Time) error {
+	linhas, err := tx.Query(ctx, `
+		UPDATE convites
+		SET revogado_em = $3
+		WHERE organizacao_id = $1::uuid
+		  AND criado_por = $2::uuid
+		  AND aceito_em IS NULL
+		  AND revogado_em IS NULL
+		  AND expira_em > $3
+		RETURNING id::text, email`,
+		orgID, criadorID, agora)
+	if err != nil {
+		return err
+	}
+	type conviteRevogado struct {
+		id    string
+		email string
+	}
+	revogados, err := pgx.CollectRows(linhas, func(l pgx.CollectableRow) (conviteRevogado, error) {
+		var r conviteRevogado
+		err := l.Scan(&r.id, &r.email)
+		return r, err
+	})
+	if err != nil {
+		return err
+	}
+	for _, item := range revogados {
+		if err := registrarAcessoEm(ctx, tx, &orgID, &atorID, nil, &item.email, "convite_revogado", map[string]any{
+			"conviteId": item.id,
+			"motivo":    motivo,
+		}, agora); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *API) criarConvite(w http.ResponseWriter, r *http.Request, s contextoSessao) {
@@ -270,17 +329,37 @@ func (a *API) criarConvite(w http.ResponseWriter, r *http.Request, s contextoSes
 		return
 	}
 
-	if _, err := tx.Exec(r.Context(), `
+	linhasSubstituidos, err := tx.Query(r.Context(), `
 		UPDATE convites
 		SET revogado_em = $3
 		WHERE organizacao_id = $1::uuid
 		  AND lower(email) = $2
 		  AND aceito_em IS NULL
 		  AND revogado_em IS NULL
-		  AND expira_em > $3`,
-		org, email, agora); err != nil {
+		  AND expira_em > $3
+		RETURNING id::text`,
+		org, email, agora)
+	if err != nil {
 		falhaInterna(w, err)
 		return
+	}
+	substituidos, err := pgx.CollectRows(linhasSubstituidos, func(l pgx.CollectableRow) (string, error) {
+		var idAntigo string
+		err := l.Scan(&idAntigo)
+		return idAntigo, err
+	})
+	if err != nil {
+		falhaInterna(w, err)
+		return
+	}
+	for _, idAntigo := range substituidos {
+		if err := registrarAcessoEm(r.Context(), tx, &org, &s.usuario.ID, nil, &email, "convite_revogado", map[string]any{
+			"conviteId": idAntigo,
+			"motivo":    "substituido",
+		}, agora); err != nil {
+			falhaInterna(w, err)
+			return
+		}
 	}
 
 	token, tokenHash, err := gerarTokenConvite()
@@ -314,9 +393,9 @@ func (a *API) criarConvite(w http.ResponseWriter, r *http.Request, s contextoSes
 		return
 	}
 
-	link := a.montarLinkConvite(token)
-	estado, msgEnvio := a.enviarEmailConvite(r.Context(), org, conviteID, email, orgNome, link)
-	a.atualizarEstadoEnvioConvite(conviteID, tokenHash, estado)
+	link, linkConfigurado := a.montarLinkConvite(token)
+	estado, msgEnvio := a.enviarEmailConvite(r.Context(), org, conviteID, email, orgNome, link, linkConfigurado)
+	estado = a.atualizarEstadoEnvioConvite(conviteID, tokenHash, estado)
 
 	criadoPorNome := s.usuario.Nome
 	responder(w, 201, RespostaConviteCriado{
@@ -424,9 +503,9 @@ func (a *API) reenviarConvite(w http.ResponseWriter, r *http.Request, s contexto
 		return
 	}
 
-	link := a.montarLinkConvite(token)
-	estado, msgEnvio := a.enviarEmailConvite(r.Context(), org, conviteID, email, orgNome, link)
-	a.atualizarEstadoEnvioConvite(conviteID, tokenHash, estado)
+	link, linkConfigurado := a.montarLinkConvite(token)
+	estado, msgEnvio := a.enviarEmailConvite(r.Context(), org, conviteID, email, orgNome, link, linkConfigurado)
+	estado = a.atualizarEstadoEnvioConvite(conviteID, tokenHash, estado)
 
 	responder(w, 200, RespostaConviteCriado{
 		Convite: ConvitePendente{
@@ -515,10 +594,20 @@ func (a *API) verConvitePublico(w http.ResponseWriter, r *http.Request) {
 		       EXISTS (SELECT 1 FROM usuarios u WHERE lower(u.email) = lower(c.email))
 		FROM convites c
 		JOIN organizacoes o ON o.id = c.organizacao_id
+		JOIN membros cm ON cm.organizacao_id = c.organizacao_id AND cm.usuario_id = c.criado_por
 		WHERE c.token_hash = $1
 		  AND c.aceito_em IS NULL
 		  AND c.revogado_em IS NULL
-		  AND c.expira_em > $2`,
+		  AND c.expira_em > $2
+		  AND (
+		    cm.papel = 'dono'
+		    OR EXISTS (
+		      SELECT 1 FROM alcadas_membro cam
+		      WHERE cam.organizacao_id = cm.organizacao_id
+		        AND cam.usuario_id = cm.usuario_id
+		        AND cam.alcada = 'gerenciar_pessoas'
+		    )
+		  )`,
 		tokenHash, a.agora()).
 		Scan(&orgNome, &email, &contaExistente)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -590,6 +679,20 @@ func (a *API) aceitarConvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// S-1: o convite só pode ser aceito enquanto quem o criou continuar dono ou membro com gerenciar_pessoas.
+	criadorAutorizado := false
+	if criadoPor != nil {
+		criadorAutorizado, err = exigirAlcadaCom(r.Context(), tx, orgID, *criadoPor, "gerenciar_pessoas", false)
+		if err != nil {
+			falhaInterna(w, err)
+			return
+		}
+	}
+	if !criadorAutorizado {
+		erro(w, 404, "convite_invalido", "Este convite não é válido ou já expirou.")
+		return
+	}
+
 	// Serializa criação/vinculação do mesmo e-mail para evitar corridas.
 	if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtext('laura-growth:usuario:' || $1))`, email); err != nil {
 		falhaInterna(w, err)
@@ -626,6 +729,23 @@ func (a *API) aceitarConvite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if jaMembro {
+			if _, err := tx.Exec(r.Context(), `
+				UPDATE convites SET revogado_em = $1 WHERE id = $2::uuid`,
+				agora, conviteID); err != nil {
+				falhaInterna(w, err)
+				return
+			}
+			if err := registrarAcessoEm(r.Context(), tx, &orgID, &usuarioID, &usuarioID, &email, "convite_revogado", map[string]any{
+				"conviteId": conviteID,
+				"motivo":    "ja_membro",
+			}, agora); err != nil {
+				falhaInterna(w, err)
+				return
+			}
+			if err := tx.Commit(r.Context()); err != nil {
+				falhaInterna(w, err)
+				return
+			}
 			erro(w, 409, "ja_membro", "Esta pessoa já faz parte da organização.")
 			return
 		}

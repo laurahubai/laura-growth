@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -37,14 +38,37 @@ func novoEnviadorEmailZoho(urlBase, chave string) *enviadorEmailZoho {
 	return novoEnviadorEmailZohoComTimeout(urlBase, chave, tempoLimiteEmail)
 }
 
+func urlZohoSegura(urlBase string) bool {
+	u, err := url.Parse(urlBase)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if strings.EqualFold(u.Scheme, "https") {
+		return true
+	}
+	if !strings.EqualFold(u.Scheme, "http") {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "localhost" {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.Unmap().IsLoopback()
+}
+
 func novoEnviadorEmailZohoComTimeout(urlBase, chave string, timeout time.Duration) *enviadorEmailZoho {
 	base := strings.TrimRight(strings.TrimSpace(urlBase), "/")
 	if base == "" {
 		base = enderecoZohoPadrao
 	}
+	chaveLimpa := strings.TrimSpace(chave)
+	if !urlZohoSegura(base) {
+		chaveLimpa = ""
+	}
 	return &enviadorEmailZoho{
 		urlBase: base,
-		chave:   strings.TrimSpace(chave),
+		chave:   chaveLimpa,
 		cliente: &http.Client{
 			Timeout: timeout,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -55,12 +79,8 @@ func novoEnviadorEmailZohoComTimeout(urlBase, chave string, timeout time.Duratio
 }
 
 func (z *enviadorEmailZoho) enviar(ctx context.Context, para, assunto, texto string) error {
-	if z == nil || z.chave == "" {
+	if z == nil || z.chave == "" || !urlZohoSegura(z.urlBase) {
 		return errEmailNaoConfigurado
-	}
-	u, err := url.Parse(z.urlBase)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return errors.New("endereço do serviço de e-mail inválido")
 	}
 
 	corpo, err := json.Marshal(struct {

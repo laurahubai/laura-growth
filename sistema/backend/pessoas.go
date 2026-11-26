@@ -272,6 +272,12 @@ func (a *API) salvarAlcadasPessoa(w http.ResponseWriter, r *http.Request, s cont
 				falhaInterna(w, err)
 				return
 			}
+			if al == "gerenciar_pessoas" {
+				if err := revogarConvitesPendentesDoCriador(r.Context(), tx, org, s.usuario.ID, alvoID, "alcada_criador_revogada", a.agora()); err != nil {
+					falhaInterna(w, err)
+					return
+				}
+			}
 		} else if !estava && fica {
 			if _, err := tx.Exec(r.Context(), `
 				INSERT INTO alcadas_membro (organizacao_id, usuario_id, alcada, concedida_por)
@@ -372,6 +378,10 @@ func (a *API) removerPessoa(w http.ResponseWriter, r *http.Request, s contextoSe
 		UPDATE sessoes SET organizacao_id = NULL
 		WHERE usuario_id = $1::uuid AND organizacao_id = $2::uuid`,
 		alvoID, org); err != nil {
+		falhaInterna(w, err)
+		return
+	}
+	if err := revogarConvitesPendentesDoCriador(r.Context(), tx, org, s.usuario.ID, alvoID, "criador_removido", a.agora()); err != nil {
 		falhaInterna(w, err)
 		return
 	}

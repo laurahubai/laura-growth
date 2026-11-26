@@ -209,6 +209,19 @@ func TestAdaptadorEmailZohoContrato(t *testing.T) {
 			t.Fatalf("esperava errEmailNaoConfigurado, veio %v", err)
 		}
 	})
+
+	t.Run("recusa http fora de loopback e aceita localhost e ipv6 loopback", func(t *testing.T) {
+		adpExterno := novoEnviadorEmailZoho("http://zoho.externo.example:8030", chaveSecreta)
+		if err := adpExterno.enviar(context.Background(), "a@b.com", "s", "t"); !errors.Is(err, errEmailNaoConfigurado) {
+			t.Fatalf("esperava errEmailNaoConfigurado para http externo, veio %v", err)
+		}
+		if adpExterno.chave != "" {
+			t.Fatal("chave não deveria permanecer guardada para URL insegura")
+		}
+		if !urlZohoSegura("http://localhost:8030") || !urlZohoSegura("http://[::1]:8030") || !urlZohoSegura("https://zoho.externo.example") {
+			t.Fatal("endereços válidos deveriam ser aceitos")
+		}
+	})
 }
 
 func TestConvitesB1CriarPermissoesEEnvio(t *testing.T) {
@@ -331,6 +344,21 @@ func TestConvitesB1CriarPermissoesEEnvio(t *testing.T) {
 	}
 	if st := gestor.pedir("DELETE", "/api/convites/"+substituido.Convite.ID, nil, nil); st != 404 {
 		t.Fatalf("revogar convite já revogado esperava 404, veio %d", st)
+	}
+
+	// S-3: substituição do convite pendente deve ter sido auditada como convite_revogado (motivo=substituido).
+	var reg RespRegistroParaTeste
+	if st := gestor.pedir("GET", "/api/pessoas/registro", nil, &reg); st != 200 {
+		t.Fatal(st)
+	}
+	achouSubstituido := false
+	for _, r := range reg.Registros {
+		if r.Acao == "convite_revogado" && r.Detalhe["motivo"] == "substituido" && r.Detalhe["conviteId"] == criado.Convite.ID {
+			achouSubstituido = true
+		}
+	}
+	if !achouSubstituido {
+		t.Fatalf("esperava auditoria convite_revogado com motivo=substituido para %s, veio %+v", criado.Convite.ID, reg.Registros)
 	}
 }
 
@@ -687,5 +715,128 @@ func TestConvitesB10LimitesAbuso(t *testing.T) {
 		"alcadas": []string{"ver_marca_posts"},
 	}, nil); st != 201 {
 		t.Fatalf("convidar após revogar 1 esperava 201, veio %d", st)
+	}
+}
+
+func TestConvitesAjustesRevisaoS2(t *testing.T) {
+	// G-1: sem LG_ENDERECO_PUBLICO, não envia e-mail (0 envios), grava falhou e devolve link relativo.
+	api, fake := novaAPIConvitesTeste(t)
+	api.enderecoPublico = ""
+	paulo := novoCliente(t, api)
+	sessPaulo := entrarComoPaulo(t, paulo)
+	growth := sessPaulo.Organizacoes[0]
+
+	var respG1 RespostaConviteCriado
+	if st := paulo.pedir("POST", "/api/convites", map[string]any{
+		"email":   "g1@exemplo.com",
+		"alcadas": []string{"ver_marca_posts"},
+	}, &respG1); st != 201 {
+		t.Fatalf("G-1 esperava 201, veio %d", st)
+	}
+	if fake.total() != 0 {
+		t.Fatalf("G-1 esperava 0 envios no adaptador, veio %d", fake.total())
+	}
+	if respG1.Convite.EnvioEstado != "falhou" || respG1.MensagemEnvio == nil || !strings.HasPrefix(respG1.Link, "/convite/") {
+		t.Fatalf("G-1 resposta inesperada: %+v", respG1)
+	}
+
+	// S-5: nome da organização longo / com CR/LF é saneado e limitado a 120 caracteres no e-mail.
+	api.enderecoPublico = "https://app.lauragrowth.test"
+	nomeLongo := "Org\r\n" + strings.Repeat("A", 150)
+	if _, err := api.banco.Exec(context.Background(), `UPDATE organizacoes SET nome = $1 WHERE id = $2::uuid`, nomeLongo, growth.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st := paulo.pedir("POST", "/api/convites", map[string]any{
+		"email":   "s5@exemplo.com",
+		"alcadas": []string{"ver_marca_posts"},
+	}, nil); st != 201 {
+		t.Fatal(st)
+	}
+	envioS5 := fake.ultimo()
+	if strings.ContainsAny(envioS5.Assunto, "\r\n") {
+		t.Fatalf("assunto contém CR/LF: %q", envioS5.Assunto)
+	}
+	if strings.Contains(envioS5.Assunto, strings.Repeat("A", 121)) || strings.Contains(envioS5.Texto, strings.Repeat("A", 121)) {
+		t.Fatalf("nome da org não foi limitado a 120 caracteres: %+v", envioS5)
+	}
+
+	// S-1 parte 1: revogar gerenciar_pessoas do criador revoga convites pendentes dele e impede aceite.
+	gestor1ID := criarMembroNaOrg(t, api.banco, growth.ID, "Gestor 1", "gestor1-s1@exemplo.com", "gerenciar_pessoas")
+	gestor1 := novoCliente(t, api)
+	entrarComEmail(t, gestor1, "gestor1-s1@exemplo.com")
+
+	var convG1 RespostaConviteCriado
+	if st := gestor1.pedir("POST", "/api/convites", map[string]any{
+		"email":   "alvo-s1-a@exemplo.com",
+		"alcadas": []string{"gerenciar_pessoas"},
+	}, &convG1); st != 201 {
+		t.Fatal(st)
+	}
+	tokG1 := extrairTokenDeLink(t, convG1.Link)
+
+	if st := paulo.pedir("PUT", "/api/pessoas/"+gestor1ID+"/alcadas", map[string]any{"alcadas": []string{"ver_marca_posts"}}, nil); st != 200 {
+		t.Fatalf("revogar gerenciar_pessoas do criador falhou: %d", st)
+	}
+	anon := novoCliente(t, api)
+	if st := anon.pedir("GET", "/api/convites/"+tokG1, nil, nil); st != 404 {
+		t.Fatalf("convite após criador perder gerenciar_pessoas esperava 404, veio %d", st)
+	}
+	if st := anon.pedir("POST", "/api/convites/"+tokG1+"/aceitar", map[string]any{"nome": "Alvo", "senha": "senha-segura-123"}, nil); st != 404 {
+		t.Fatalf("aceitar convite após criador perder gerenciar_pessoas esperava 404, veio %d", st)
+	}
+
+	// S-1 parte 2: remover criador da organização revoga convites pendentes dele e impede aceite.
+	gestor2ID := criarMembroNaOrg(t, api.banco, growth.ID, "Gestor 2", "gestor2-s1@exemplo.com", "gerenciar_pessoas")
+	gestor2 := novoCliente(t, api)
+	entrarComEmail(t, gestor2, "gestor2-s1@exemplo.com")
+
+	var convG2 RespostaConviteCriado
+	if st := gestor2.pedir("POST", "/api/convites", map[string]any{
+		"email":   "alvo-s1-b@exemplo.com",
+		"alcadas": []string{"ver_marca_posts"},
+	}, &convG2); st != 201 {
+		t.Fatal(st)
+	}
+	tokG2 := extrairTokenDeLink(t, convG2.Link)
+
+	if st := paulo.pedir("DELETE", "/api/pessoas/"+gestor2ID, nil, nil); st != 204 {
+		t.Fatalf("remover criador falhou: %d", st)
+	}
+	if st := anon.pedir("POST", "/api/convites/"+tokG2+"/aceitar", map[string]any{"nome": "Alvo", "senha": "senha-segura-123"}, nil); st != 404 {
+		t.Fatalf("aceitar convite após criador ser removido esperava 404, veio %d", st)
+	}
+
+	// S-1 defesa em profundidade dentro da transação de aceite (caso criado_por seja NULL no banco).
+	var convNull RespostaConviteCriado
+	if st := paulo.pedir("POST", "/api/convites", map[string]any{
+		"email":   "alvo-s1-c@exemplo.com",
+		"alcadas": []string{"ver_marca_posts"},
+	}, &convNull); st != 201 {
+		t.Fatal(st)
+	}
+	if _, err := api.banco.Exec(context.Background(), `UPDATE convites SET criado_por = NULL WHERE id = $1::uuid`, convNull.Convite.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st := anon.pedir("POST", "/api/convites/"+extrairTokenDeLink(t, convNull.Link)+"/aceitar", map[string]any{"nome": "Alvo", "senha": "senha-segura-123"}, nil); st != 404 {
+		t.Fatalf("aceitar convite sem criador autorizado esperava 404, veio %d", st)
+	}
+
+	// G-3: se a pessoa já virou membro antes do aceite, aceitar revoga o convite e devolve 409 ja_membro.
+	var convG3 RespostaConviteCriado
+	if st := paulo.pedir("POST", "/api/convites", map[string]any{
+		"email":   "g3-virou-membro@exemplo.com",
+		"alcadas": []string{"ver_marca_posts"},
+	}, &convG3); st != 201 {
+		t.Fatal(st)
+	}
+	criarMembroNaOrg(t, api.banco, growth.ID, "G3 Membro", "g3-virou-membro@exemplo.com")
+	cliG3 := novoCliente(t, api)
+	entrarComEmail(t, cliG3, "g3-virou-membro@exemplo.com")
+	if st, body := cliG3.pedirComCorpo("POST", "/api/convites/"+extrairTokenDeLink(t, convG3.Link)+"/aceitar", map[string]any{}); st != 409 || !strings.Contains(string(body), "ja_membro") {
+		t.Fatalf("G-3 esperava 409 ja_membro, veio %d (%s)", st, body)
+	}
+	var revG3 *time.Time
+	if err := api.banco.QueryRow(context.Background(), `SELECT revogado_em FROM convites WHERE id = $1::uuid`, convG3.Convite.ID).Scan(&revG3); err != nil || revG3 == nil {
+		t.Fatalf("G-3 convite deveria estar revogado para não contar no limite de 30, veio revogado_em=%v err=%v", revG3, err)
 	}
 }
