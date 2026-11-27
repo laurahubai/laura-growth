@@ -67,16 +67,18 @@ type ModeloResumo struct {
 }
 
 type ResultadoTeste struct {
-	ExecucaoID    string       `json:"execucaoId"`
-	Servico       string       `json:"servico"`
-	Modelo        ModeloResumo `json:"modelo"`
-	Texto         *string      `json:"texto"`
-	ImagemDataUrl *string      `json:"imagemDataUrl"`
-	TokensEntrada int          `json:"tokensEntrada"`
-	TokensSaida   int          `json:"tokensSaida"`
-	Imagens       int          `json:"imagens"`
-	CustoUsd      float64      `json:"custoUsd"`
-	Simulado      bool         `json:"simulado"`
+	ExecucaoID          string       `json:"execucaoId"`
+	Servico             string       `json:"servico"`
+	Modelo              ModeloResumo `json:"modelo"`
+	Texto               *string      `json:"texto"`
+	ImagemDataUrl       *string      `json:"imagemDataUrl"`
+	TokensEntrada       int          `json:"tokensEntrada"`
+	TokensEntradaImagem *int         `json:"tokensEntradaImagem"`
+	TokensSaida         int          `json:"tokensSaida"`
+	Imagens             int          `json:"imagens"`
+	CustoUsd            float64      `json:"custoUsd"`
+	BasePreco           *string      `json:"basePreco"`
+	Simulado            bool         `json:"simulado"`
 }
 
 type Execucao struct {
@@ -92,10 +94,12 @@ type Execucao struct {
 	Status              string    `json:"status"`
 	Erro                *string   `json:"erro"`
 	TokensEntrada       int       `json:"tokensEntrada"`
+	TokensEntradaImagem *int      `json:"tokensEntradaImagem"`
 	TokensSaida         int       `json:"tokensSaida"`
 	Imagens             int       `json:"imagens"`
 	CustoUsd            float64   `json:"custoUsd"`
 	CustoEstimado       bool      `json:"custoEstimado"`
+	BasePreco           *string   `json:"basePreco"`
 	Simulado            bool      `json:"simulado"`
 }
 
@@ -137,9 +141,11 @@ type ResultadoAtividade struct {
 	Texto               *string      `json:"texto"`
 	ImagemDataUrl       *string      `json:"imagemDataUrl"`
 	TokensEntrada       int          `json:"tokensEntrada"`
+	TokensEntradaImagem *int         `json:"tokensEntradaImagem"`
 	TokensSaida         int          `json:"tokensSaida"`
 	Imagens             int          `json:"imagens"`
 	CustoUsd            float64      `json:"custoUsd"`
+	BasePreco           *string      `json:"basePreco"`
 	Simulado            bool         `json:"simulado"`
 }
 
@@ -188,16 +194,61 @@ func (c candidatoExecucao) resumo() ModeloResumo {
 }
 
 type precosVigentesTexto struct {
-	entrada *string
-	saida   *string
-	imagem  *string
+	entrada       *string
+	entradaImagem *string
+	saida         *string
+	imagem        *string
+}
+
+func (p precosVigentesTexto) completoPorTokens(servico string) bool {
+	if servico == "imagem" {
+		return p.entrada != nil && p.entradaImagem != nil && p.saida != nil
+	}
+	return p.entrada != nil && p.saida != nil
 }
 
 func (p precosVigentesTexto) completoPara(servico string) bool {
 	if servico == "imagem" {
-		return p.imagem != nil
+		return p.completoPorTokens("imagem") || p.imagem != nil
 	}
-	return p.entrada != nil && p.saida != nil
+	return p.completoPorTokens("texto")
+}
+
+// paraExecucao seleciona apenas os preços da base aplicada (tokens ou por imagem)
+// para evitar soma duplicada e permitir derivar a base de cobrança pelo histórico.
+func (p precosVigentesTexto) paraExecucao(servico string) precosVigentesTexto {
+	if servico == "imagem" {
+		if p.completoPorTokens("imagem") {
+			return precosVigentesTexto{
+				entrada:       p.entrada,
+				entradaImagem: p.entradaImagem,
+				saida:         p.saida,
+			}
+		}
+		if p.imagem != nil {
+			return precosVigentesTexto{imagem: p.imagem}
+		}
+		return precosVigentesTexto{}
+	}
+	return precosVigentesTexto{
+		entrada: p.entrada,
+		saida:   p.saida,
+	}
+}
+
+func derivarBasePreco(status string, precoTokenEntrada, precoTokenEntradaImagem, precoTokenSaida, precoImagem *string) *string {
+	if status != "ok" {
+		return nil
+	}
+	if precoImagem != nil {
+		b := "imagem"
+		return &b
+	}
+	if precoTokenEntrada != nil || precoTokenEntradaImagem != nil || precoTokenSaida != nil {
+		b := "tokens"
+		return &b
+	}
+	return nil
 }
 
 // ---- Rotas de Atividades, Testar, Execuções e Avisos ----
@@ -342,16 +393,18 @@ func (a *API) testarModelo(w http.ResponseWriter, r *http.Request, s contextoSes
 	}
 
 	responder(w, 200, ResultadoTeste{
-		ExecucaoID:    res.execucaoID,
-		Servico:       cand.servico,
-		Modelo:        cand.resumo(),
-		Texto:         res.texto,
-		ImagemDataUrl: res.imagemURL,
-		TokensEntrada: res.tokensIn,
-		TokensSaida:   res.tokensOut,
-		Imagens:       res.imgs,
-		CustoUsd:      res.custoUsd,
-		Simulado:      cand.fornecedorTipo == "simulado",
+		ExecucaoID:          res.execucaoID,
+		Servico:             cand.servico,
+		Modelo:              cand.resumo(),
+		Texto:               res.texto,
+		ImagemDataUrl:       res.imagemURL,
+		TokensEntrada:       res.tokensIn,
+		TokensEntradaImagem: res.tokensInImagemPtr,
+		TokensSaida:         res.tokensOut,
+		Imagens:             res.imgs,
+		CustoUsd:            res.custoUsd,
+		BasePreco:           res.basePreco,
+		Simulado:            cand.fornecedorTipo == "simulado",
 	})
 }
 
@@ -392,7 +445,9 @@ func (a *API) listarExecucoes(w http.ResponseWriter, r *http.Request, _ contexto
 			e.id::text, e.correlacao_id::text, e.criado_em, e.atividade,
 			o.nome, e.fornecedor_nome, e.modelo_identificador,
 			e.tentativa, e.atendido_pela_reserva, e.status, e.erro,
-			e.tokens_entrada, e.tokens_saida, e.imagens,
+			e.tokens_entrada, e.tokens_entrada_imagem, e.tokens_saida, e.imagens,
+			e.preco_token_entrada::text, e.preco_token_entrada_imagem::text,
+			e.preco_token_saida::text, e.preco_imagem::text,
 			e.custo_usd::text, e.custo_estimado, e.simulado
 		FROM ia_execucoes e
 		LEFT JOIN organizacoes o ON o.id = e.organizacao_id
@@ -405,11 +460,13 @@ func (a *API) listarExecucoes(w http.ResponseWriter, r *http.Request, _ contexto
 	lista, err := pgx.CollectRows(linhas, func(l pgx.CollectableRow) (Execucao, error) {
 		var ex Execucao
 		var custoStr string
+		var pEnt, pEntImg, pSai, pImg *string
 		if err := l.Scan(
 			&ex.ID, &ex.CorrelacaoID, &ex.CriadoEm, &ex.Atividade,
 			&ex.OrganizacaoNome, &ex.FornecedorNome, &ex.ModeloIdentificador,
 			&ex.Tentativa, &ex.AtendidoPelaReserva, &ex.Status, &ex.Erro,
-			&ex.TokensEntrada, &ex.TokensSaida, &ex.Imagens,
+			&ex.TokensEntrada, &ex.TokensEntradaImagem, &ex.TokensSaida, &ex.Imagens,
+			&pEnt, &pEntImg, &pSai, &pImg,
 			&custoStr, &ex.CustoEstimado, &ex.Simulado,
 		); err != nil {
 			return ex, err
@@ -419,6 +476,7 @@ func (a *API) listarExecucoes(w http.ResponseWriter, r *http.Request, _ contexto
 			return ex, errors.New("custo inválido no banco")
 		}
 		ex.CustoUsd = v
+		ex.BasePreco = derivarBasePreco(ex.Status, pEnt, pEntImg, pSai, pImg)
 		return ex, nil
 	})
 	if err != nil {
@@ -566,7 +624,7 @@ func (a *API) executarAtividadeInterna(ctx context.Context, atividade, orgID, us
 		// Verificação de uso restrito à casa (AC30).
 		if cand.usoPermitido == "casa" && !orgDaCasa {
 			msg := "Fornecedor restrito às organizações da casa."
-			if err := a.registrarTentativaSemExecucaoEm(ctx, a.banco, cand, precos, correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, "falha", msg); err != nil {
+			if err := a.registrarTentativaSemExecucaoEm(ctx, a.banco, cand, precos.paraExecucao(cand.servico), correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, "falha", msg); err != nil {
 				slog.Error("falha ao registrar tentativa", "erro", err)
 				return ResultadoAtividade{}, 500, "falha_interna", "Algo deu errado. Tente de novo."
 			}
@@ -578,7 +636,7 @@ func (a *API) executarAtividadeInterna(ctx context.Context, atividade, orgID, us
 		// Verificação de modelo/fornecedor ativo ou sem preço.
 		if !cand.fornecedorAtivo || !cand.modeloAtivo {
 			msg := "Modelo ou fornecedor desativado."
-			if err := a.registrarTentativaSemExecucaoEm(ctx, a.banco, cand, precos, correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, "falha", msg); err != nil {
+			if err := a.registrarTentativaSemExecucaoEm(ctx, a.banco, cand, precos.paraExecucao(cand.servico), correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, "falha", msg); err != nil {
 				slog.Error("falha ao registrar tentativa", "erro", err)
 				return ResultadoAtividade{}, 500, "falha_interna", "Algo deu errado. Tente de novo."
 			}
@@ -588,7 +646,7 @@ func (a *API) executarAtividadeInterna(ctx context.Context, atividade, orgID, us
 		}
 		if !precos.completoPara(cand.servico) {
 			msg := "Modelo sem preço vigente."
-			if err := a.registrarTentativaSemExecucaoEm(ctx, a.banco, cand, precos, correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, "falha", msg); err != nil {
+			if err := a.registrarTentativaSemExecucaoEm(ctx, a.banco, cand, precos.paraExecucao(cand.servico), correlacaoID, def.Codigo, orgID, usuarioID, par.numero, par.reserva, "falha", msg); err != nil {
 				slog.Error("falha ao registrar tentativa", "erro", err)
 				return ResultadoAtividade{}, 500, "falha_interna", "Algo deu errado. Tente de novo."
 			}
@@ -628,9 +686,11 @@ func (a *API) executarAtividadeInterna(ctx context.Context, atividade, orgID, us
 			Texto:               res.texto,
 			ImagemDataUrl:       res.imagemURL,
 			TokensEntrada:       res.tokensIn,
+			TokensEntradaImagem: res.tokensInImagemPtr,
 			TokensSaida:         res.tokensOut,
 			Imagens:             res.imgs,
 			CustoUsd:            res.custoUsd,
+			BasePreco:           res.basePreco,
 			Simulado:            cand.fornecedorTipo == "simulado",
 		}, 0, "", ""
 	}
@@ -684,14 +744,16 @@ func (e *erroInternoExecucao) Error() string { return "Algo deu errado. Tente de
 func (e *erroInternoExecucao) Unwrap() error { return e.err }
 
 type resultadoExecucao struct {
-	execucaoID   string
-	texto        *string
-	imagemURL    *string
-	tokensIn     int
-	tokensOut    int
-	imgs         int
-	custoUsd     float64
-	puladoLimite bool
+	execucaoID        string
+	texto             *string
+	imagemURL         *string
+	tokensIn          int
+	tokensInImagemPtr *int
+	tokensOut         int
+	imgs              int
+	custoUsd          float64
+	basePreco         *string
+	puladoLimite      bool
 }
 
 func chaveTravaFornecedor(fornecedorID string) (int32, int32) {
@@ -741,7 +803,7 @@ func (a *API) executarComTrava(
 	if noLimite {
 		if registrarPuloLimite {
 			if err := a.registrarTentativaSemExecucaoEm(
-				ctx, tx, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "pulado_limite", "Limite mensal atingido.",
+				ctx, tx, cand, precos.paraExecucao(cand.servico), correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "pulado_limite", "Limite mensal atingido.",
 			); err != nil {
 				slog.Error("falha ao registrar pulo por limite", "atividade", atividade, "modeloId", cand.modeloID, "erro", err)
 				return resultadoExecucao{}, &erroInternoExecucao{err: err}
@@ -786,13 +848,14 @@ func (a *API) executarEGerarEm(
 	atendidoPelaReserva bool,
 	prompt string,
 ) (resultadoExecucao, error) {
+	precosAplicados := precos.paraExecucao(cand.servico)
 	var chave string
 	endereco := cand.endereco
 	if cand.fornecedorTipo != "simulado" {
 		enderecoValidado, err := a.resolverEnderecoFornecedor(ctx, cand.fornecedorTipo, endereco)
 		if err != nil {
 			msg := err.Error()
-			if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", msg); errReg != nil {
+			if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precosAplicados, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", msg); errReg != nil {
 				slog.Error("falha ao registrar tentativa com endereço inválido", "fornecedorId", cand.fornecedorID, "erro", errReg)
 				return resultadoExecucao{}, &erroInternoExecucao{err: errReg}
 			}
@@ -808,7 +871,7 @@ func (a *API) executarEGerarEm(
 		if err != nil {
 			slog.Error("falha ao decifrar chave do fornecedor", "fornecedorId", cand.fornecedorID)
 			msg := "Não foi possível ler a chave salva; cadastre-a de novo."
-			if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", msg); errReg != nil {
+			if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precosAplicados, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", msg); errReg != nil {
 				slog.Error("falha ao registrar tentativa com chave ilegível", "fornecedorId", cand.fornecedorID, "erro", errReg)
 				return resultadoExecucao{}, &erroInternoExecucao{err: errReg}
 			}
@@ -827,7 +890,7 @@ func (a *API) executarEGerarEm(
 			slog.Error("falha interna ao criar conector", "fornecedorId", cand.fornecedorID, "erro", err)
 			return resultadoExecucao{}, &erroInternoExecucao{err: err}
 		}
-		if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", ef.mensagem); errReg != nil {
+		if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precosAplicados, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", ef.mensagem); errReg != nil {
 			slog.Error("falha ao registrar tentativa do conector", "fornecedorId", cand.fornecedorID, "erro", errReg)
 			return resultadoExecucao{}, &erroInternoExecucao{err: errReg}
 		}
@@ -835,6 +898,7 @@ func (a *API) executarEGerarEm(
 	}
 
 	var res resultadoExecucao
+	var tokensInImagemVal int
 	if cand.servico == "imagem" {
 		resp, err := con.gerarImagem(ctx, cand.identificador, prompt)
 		if err != nil {
@@ -843,7 +907,7 @@ func (a *API) executarEGerarEm(
 				slog.Error("falha interna ao gerar imagem no fornecedor", "fornecedorId", cand.fornecedorID, "modeloId", cand.modeloID, "erro", err)
 				return resultadoExecucao{}, &erroInternoExecucao{err: err}
 			}
-			if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", ef.mensagem); errReg != nil {
+			if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precosAplicados, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", ef.mensagem); errReg != nil {
 				slog.Error("falha ao registrar tentativa de imagem", "fornecedorId", cand.fornecedorID, "modeloId", cand.modeloID, "erro", errReg)
 				return resultadoExecucao{}, &erroInternoExecucao{err: errReg}
 			}
@@ -851,6 +915,8 @@ func (a *API) executarEGerarEm(
 		}
 		res.imgs = resp.Imagens
 		res.tokensIn = resp.TokensEntrada
+		tokensInImagemVal = resp.TokensEntradaImagem
+		res.tokensInImagemPtr = &tokensInImagemVal
 		res.tokensOut = resp.TokensSaida
 		res.imagemURL = &resp.ImagemDataUrl
 	} else {
@@ -861,7 +927,7 @@ func (a *API) executarEGerarEm(
 				slog.Error("falha interna ao gerar texto no fornecedor", "fornecedorId", cand.fornecedorID, "modeloId", cand.modeloID, "erro", err)
 				return resultadoExecucao{}, &erroInternoExecucao{err: err}
 			}
-			if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", ef.mensagem); errReg != nil {
+			if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precosAplicados, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", ef.mensagem); errReg != nil {
 				slog.Error("falha ao registrar tentativa de texto", "fornecedorId", cand.fornecedorID, "modeloId", cand.modeloID, "erro", errReg)
 				return resultadoExecucao{}, &erroInternoExecucao{err: errReg}
 			}
@@ -872,19 +938,20 @@ func (a *API) executarEGerarEm(
 		res.texto = &resp.Texto
 	}
 
-	custoSQL, custoFloat, err := calcularCustoExato(res.tokensIn, res.tokensOut, res.imgs, precos)
+	custoSQL, custoFloat, err := calcularCustoExato(res.tokensIn, tokensInImagemVal, res.tokensOut, res.imgs, precosAplicados)
 	if err != nil {
 		slog.Error("falha ao calcular custo da execução", "modeloId", cand.modeloID, "erro", err)
 		return resultadoExecucao{}, &erroInternoExecucao{err: err}
 	}
 
-	execucaoID, err := a.inserirExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "ok", nil, res.tokensIn, res.tokensOut, res.imgs, custoSQL)
+	execucaoID, err := a.inserirExecucaoEm(ctx, exec, cand, precosAplicados, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "ok", nil, res.tokensIn, res.tokensInImagemPtr, res.tokensOut, res.imgs, custoSQL)
 	if err != nil {
 		slog.Error("falha ao gravar execução de IA", "atividade", atividade, "modeloId", cand.modeloID, "erro", err)
 		return resultadoExecucao{}, &erroInternoExecucao{err: err}
 	}
 	res.execucaoID = execucaoID
 	res.custoUsd = custoFloat
+	res.basePreco = derivarBasePreco("ok", precosAplicados.entrada, precosAplicados.entradaImagem, precosAplicados.saida, precosAplicados.imagem)
 	return res, nil
 }
 
@@ -898,7 +965,7 @@ func (a *API) registrarTentativaSemExecucaoEm(
 	atendidoPelaReserva bool,
 	status, msgErro string,
 ) error {
-	_, err := a.inserirExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, status, &msgErro, 0, 0, 0, "0.00000000")
+	_, err := a.inserirExecucaoEm(ctx, exec, cand, precos, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, status, &msgErro, 0, nil, 0, 0, "0.00000000")
 	return err
 }
 
@@ -912,7 +979,9 @@ func (a *API) inserirExecucaoEm(
 	atendidoPelaReserva bool,
 	status string,
 	msgErro *string,
-	tokensIn, tokensOut, imgs int,
+	tokensIn int,
+	tokensInImagem *int,
+	tokensOut, imgs int,
 	custoSQL string,
 ) (string, error) {
 	var orgParam, userParam *string
@@ -932,17 +1001,17 @@ func (a *API) inserirExecucaoEm(
 			correlacao_id, atividade, organizacao_id, usuario_id,
 			fornecedor_id, modelo_id, fornecedor_nome, modelo_identificador,
 			tentativa, atendido_pela_reserva, status, erro,
-			tokens_entrada, tokens_saida, imagens,
-			preco_token_entrada, preco_token_saida, preco_imagem,
+			tokens_entrada, tokens_entrada_imagem, tokens_saida, imagens,
+			preco_token_entrada, preco_token_entrada_imagem, preco_token_saida, preco_imagem,
 			custo_usd, custo_estimado, simulado, criado_em
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, false, $20, $21)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, false, $22, $23)
 		RETURNING id::text`,
 		correlacaoID, atividade, orgParam, userParam,
 		cand.fornecedorID, cand.modeloID, cand.fornecedorNome, cand.identificador,
 		tentativa, atendidoPelaReserva, status, msgErro,
-		tokensIn, tokensOut, imgs,
-		precos.entrada, precos.saida, precos.imagem,
+		tokensIn, tokensInImagem, tokensOut, imgs,
+		precos.entrada, precos.entradaImagem, precos.saida, precos.imagem,
 		custoSQL, cand.fornecedorTipo == "simulado", agora,
 	).Scan(&id)
 	return id, err
@@ -1047,6 +1116,8 @@ func (a *API) carregarPrecosVigentesTexto(ctx context.Context, modeloID, dataISO
 		switch unidade {
 		case "token_entrada":
 			p.entrada = &copia
+		case "token_entrada_imagem":
+			p.entradaImagem = &copia
 		case "token_saida":
 			p.saida = &copia
 		case "imagem":
@@ -1099,7 +1170,7 @@ func (a *API) candidatoNoLimiteEm(ctx context.Context, exec executorSQL, cand ca
 
 // calcularCustoExato calcula o custo em US$ usando aritmética decimal exata (math/big.Rat).
 // Tokens: US$ por 1 milhão de tokens; imagem: US$ por imagem.
-func calcularCustoExato(tokensIn, tokensOut, imgs int, precos precosVigentesTexto) (string, float64, error) {
+func calcularCustoExato(tokensIn, tokensInImagem, tokensOut, imgs int, precos precosVigentesTexto) (string, float64, error) {
 	total := new(big.Rat)
 	umMilhao := big.NewRat(1_000_000, 1)
 
@@ -1109,6 +1180,15 @@ func calcularCustoExato(tokensIn, tokensOut, imgs int, precos precosVigentesText
 			return "", 0, errors.New("preço de entrada inválido")
 		}
 		parc := new(big.Rat).Mul(p, big.NewRat(int64(tokensIn), 1))
+		parc.Quo(parc, umMilhao)
+		total.Add(total, parc)
+	}
+	if tokensInImagem > 0 && precos.entradaImagem != nil {
+		p, ok := new(big.Rat).SetString(*precos.entradaImagem)
+		if !ok {
+			return "", 0, errors.New("preço de entrada de imagem inválido")
+		}
+		parc := new(big.Rat).Mul(p, big.NewRat(int64(tokensInImagem), 1))
 		parc.Quo(parc, umMilhao)
 		total.Add(total, parc)
 	}

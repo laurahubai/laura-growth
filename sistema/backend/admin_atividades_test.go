@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -113,7 +114,9 @@ func TestAC29AC35TestarModeloTextoEImagem(t *testing.T) {
 		t.Fatalf("testar modelo imagem falhou: %d", st)
 	}
 	if resImg.Servico != "imagem" || resImg.ImagemDataUrl == nil || !strings.HasPrefix(*resImg.ImagemDataUrl, "data:image/png;base64,") ||
-		resImg.Texto != nil || resImg.Imagens != 1 || resImg.CustoUsd != 0.05 || !resImg.Simulado {
+		resImg.Texto != nil || resImg.Imagens != 1 || resImg.CustoUsd != 0.05 || !resImg.Simulado ||
+		resImg.TokensEntrada != 12 || resImg.TokensEntradaImagem == nil || *resImg.TokensEntradaImagem != 0 ||
+		resImg.TokensSaida != 1258 || resImg.BasePreco == nil || *resImg.BasePreco != "imagem" {
 		t.Fatalf("resultado teste imagem inesperado: %+v", resImg)
 	}
 
@@ -957,5 +960,232 @@ func TestJ2EJ3Erro400FornecedorEAtividadeSemReserva(t *testing.T) {
 		"modeloPrincipalId": modTxt, "modeloReservaId": nil,
 	}); stFK != 404 || !strings.Contains(string(bodyFK), "nao_encontrado") {
 		t.Fatalf("FK 23503 ao salvar rota esperava 404 nao_encontrado, veio %d (%s)", stFK, bodyFK)
+	}
+}
+
+func TestP3P5PrecosImagemPorTokensFormulaFallbackEProntidao(t *testing.T) {
+	api := novaAPIAdminTeste(t)
+	agoraFixo := time.Date(2026, 11, 27, 10, 0, 0, 0, fusoSaoPaulo)
+	api.agora = func() time.Time { return agoraFixo }
+
+	c := novoCliente(t, api)
+	entrarComoPaulo(t, c)
+
+	// 1. Cálculo exato até 8 casas decimais na fórmula por tokens (P3).
+	pEnt, pEntImg, pSai := "0.15", "0.25", "0.35"
+	custoSQL, custoFloat, err := calcularCustoExato(1, 3, 2, 1, precosVigentesTexto{
+		entrada:       &pEnt,
+		entradaImagem: &pEntImg,
+		saida:         &pSai,
+	})
+	// 1*0.15/1e6 + 3*0.25/1e6 + 2*0.35/1e6 = (0.15 + 0.75 + 0.70) / 1e6 = 1.60 / 1e6 = 0.00000160
+	if err != nil || custoSQL != "0.00000160" || custoFloat != 0.0000016 {
+		t.Fatalf("cálculo exato até 8 casas falhou: sql=%q float=%v err=%v", custoSQL, custoFloat, err)
+	}
+	// Testa dígito na 8ª casa decimal: 1 * 0.05 / 1e6 = 0.00000005.
+	pMin := "0.05"
+	custoSQL8, custoFloat8, err := calcularCustoExato(1, 0, 0, 1, precosVigentesTexto{
+		entrada:       &pMin,
+		entradaImagem: &pMin,
+		saida:         &pMin,
+	})
+	if err != nil || custoSQL8 != "0.00000005" || custoFloat8 != 0.00000005 {
+		t.Fatalf("cálculo na 8ª casa decimal falhou: sql=%q float=%v err=%v", custoSQL8, custoFloat8, err)
+	}
+
+	// 2. HTTP test server OpenAI retornando text_tokens, image_tokens e output_tokens.
+	imgBase64 := base64.StdEncoding.EncodeToString(pngMinimo)
+	srvOAI := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/images/generations" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]any{
+					"input_tokens":  512,
+					"output_tokens": 1258,
+					"input_tokens_details": map[string]int{
+						"text_tokens":  12,
+						"image_tokens": 500,
+					},
+				},
+			})
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer srvOAI.Close()
+
+	api.permitirRedeInterna = true
+	api.tlsTeste = srvOAI.Client().Transport.(*http.Transport).TLSClientConfig
+
+	var fornOAI, fornSim Fornecedor
+	if st := c.pedir("POST", "/api/admin/fornecedores", map[string]any{
+		"nome":            "OpenAI Imagem Tokens",
+		"tipo":            "compativel_openai",
+		"endereco":        srvOAI.URL + "/v1",
+		"chave":           chaveAPITeste,
+		"limiteMensalUsd": 100,
+	}, &fornOAI); st != 201 {
+		t.Fatalf("criar fornecedor OpenAI falhou: %d", st)
+	}
+	if st := c.pedir("POST", "/api/admin/fornecedores", map[string]any{
+		"nome":            "Simulado Imagem Tokens",
+		"tipo":            "simulado",
+		"limiteMensalUsd": 100,
+	}, &fornSim); st != 201 {
+		t.Fatalf("criar fornecedor Simulado falhou: %d", st)
+	}
+
+	var modOAI, modSim Modelo
+	if st := c.pedir("POST", "/api/admin/fornecedores/"+fornOAI.ID+"/modelos", map[string]any{
+		"identificador": "chatgpt-image-latest", "servico": "imagem", "origem": "manual",
+	}, &modOAI); st != 201 {
+		t.Fatalf("criar modOAI falhou: %d", st)
+	}
+	if st := c.pedir("POST", "/api/admin/fornecedores/"+fornSim.ID+"/modelos", map[string]any{
+		"identificador": "simulado-imagem", "servico": "imagem", "origem": "manual",
+	}, &modSim); st != 201 {
+		t.Fatalf("criar modSim falhou: %d", st)
+	}
+
+	// Vincula atividade imagem ao modOAI antes de cadastrar preços -> atividade incompleta ("preço do modelo principal").
+	if st := c.pedir("PUT", "/api/admin/atividades/imagem", map[string]any{
+		"modeloPrincipalId": modOAI.ID, "modeloReservaId": nil,
+	}, nil); st != 200 {
+		t.Fatalf("PUT atividade imagem falhou: %d", st)
+	}
+	var atvs RespostaAtividades
+	if st := c.pedir("GET", "/api/admin/atividades", nil, &atvs); st != 200 {
+		t.Fatalf("GET atividades falhou: %d", st)
+	}
+	var rotaImg RotaAtividade
+	for _, a := range atvs.Atividades {
+		if a.Atividade == "imagem" {
+			rotaImg = a
+		}
+	}
+	if rotaImg.Pronta || len(rotaImg.Falta) != 1 || rotaImg.Falta[0] != "preço do modelo principal" {
+		t.Fatalf("sem preços esperava falta preço do modelo principal, veio %+v", rotaImg)
+	}
+	if st, body := c.pedirComCorpo("POST", "/api/admin/modelos/"+modOAI.ID+"/testar", nil); st != 409 || !strings.Contains(string(body), "sem_preco") {
+		t.Fatalf("sem preços testar esperava 409 sem_preco, veio %d (%s)", st, body)
+	}
+
+	// Com apenas 2 dos 3 preços por tokens (sem imagem), continua recusando e dizendo "preço do modelo principal".
+	c.pedir("POST", "/api/admin/modelos/"+modOAI.ID+"/precos", map[string]any{
+		"unidade": "token_entrada", "precoUsd": 5.0, "vigenciaInicio": "2026-11-01",
+	}, nil)
+	c.pedir("POST", "/api/admin/modelos/"+modOAI.ID+"/precos", map[string]any{
+		"unidade": "token_entrada_imagem", "precoUsd": 10.0, "vigenciaInicio": "2026-11-01",
+	}, nil)
+	// Preço futuro de token_saida ainda não conta como vigente.
+	c.pedir("POST", "/api/admin/modelos/"+modOAI.ID+"/precos", map[string]any{
+		"unidade": "token_saida", "precoUsd": 99.0, "vigenciaInicio": "2026-12-01",
+	}, nil)
+
+	if st, body := c.pedirComCorpo("POST", "/api/admin/modelos/"+modOAI.ID+"/testar", nil); st != 409 || !strings.Contains(string(body), "sem_preco") {
+		t.Fatalf("com 2 de 3 preços esperava 409 sem_preco, veio %d (%s)", st, body)
+	}
+	if st, body := c.pedirComCorpo("POST", "/api/admin/atividades/imagem/testar", nil); st != 409 ||
+		!strings.Contains(string(body), "atividade_incompleta") || !strings.Contains(string(body), "preço do modelo principal") {
+		t.Fatalf("atividade com 2 de 3 preços esperava 409 atividade_incompleta citando preço do modelo principal, veio %d (%s)", st, body)
+	}
+
+	// Fallback por imagem: ao cadastrar "imagem" = 0.04 (sem os 3 por tokens), fica pronta e cobra por imagem.
+	c.pedir("POST", "/api/admin/modelos/"+modOAI.ID+"/precos", map[string]any{
+		"unidade": "imagem", "precoUsd": 0.04, "vigenciaInicio": "2026-11-01",
+	}, nil)
+	var resFallback ResultadoTeste
+	if st := c.pedir("POST", "/api/admin/modelos/"+modOAI.ID+"/testar", nil, &resFallback); st != 200 {
+		t.Fatalf("fallback por imagem esperava 200, veio %d", st)
+	}
+	if resFallback.CustoUsd != 0.04 || resFallback.BasePreco == nil || *resFallback.BasePreco != "imagem" ||
+		resFallback.TokensEntrada != 12 || resFallback.TokensEntradaImagem == nil || *resFallback.TokensEntradaImagem != 500 || resFallback.TokensSaida != 1258 {
+		t.Fatalf("fallback por imagem inesperado: %+v", resFallback)
+	}
+	var pEntDB, pEntImgDB, pSaiDB, pImgDB *string
+	if err := api.banco.QueryRow(context.Background(), `
+		SELECT preco_token_entrada::text, preco_token_entrada_imagem::text, preco_token_saida::text, preco_imagem::text
+		FROM ia_execucoes WHERE id::text = $1`, resFallback.ExecucaoID).Scan(&pEntDB, &pEntImgDB, &pSaiDB, &pImgDB); err != nil {
+		t.Fatal(err)
+	}
+	if pEntDB != nil || pEntImgDB != nil || pSaiDB != nil || pImgDB == nil {
+		t.Fatalf("fallback deveria gravar apenas preco_imagem, veio ent=%v entImg=%v sai=%v img=%v", pEntDB, pEntImgDB, pSaiDB, pImgDB)
+	}
+
+	// Ao completar o 3º preço por tokens (token_saida = 40.0), tokens passam a valer no lugar do preço por imagem!
+	// Custo esperado: 12*5/1e6 + 500*10/1e6 + 1258*40/1e6 = 0.00006 + 0.005 + 0.05032 = 0.05538.
+	agoraFixo = agoraFixo.Add(time.Minute)
+	c.pedir("POST", "/api/admin/modelos/"+modOAI.ID+"/precos", map[string]any{
+		"unidade": "token_saida", "precoUsd": 40.0, "vigenciaInicio": "2026-11-01",
+	}, nil)
+	var resTokens ResultadoAtividade
+	if st := c.pedir("POST", "/api/admin/atividades/imagem/testar", nil, &resTokens); st != 200 {
+		t.Fatalf("atividade imagem com 3 preços por tokens esperava 200, veio %d", st)
+	}
+	if resTokens.CustoUsd != 0.05538 || resTokens.BasePreco == nil || *resTokens.BasePreco != "tokens" ||
+		resTokens.TokensEntrada != 12 || resTokens.TokensEntradaImagem == nil || *resTokens.TokensEntradaImagem != 500 || resTokens.TokensSaida != 1258 {
+		t.Fatalf("resultado atividade por tokens inesperado: %+v", resTokens)
+	}
+	if err := api.banco.QueryRow(context.Background(), `
+		SELECT preco_token_entrada::text, preco_token_entrada_imagem::text, preco_token_saida::text, preco_imagem::text
+		FROM ia_execucoes WHERE correlacao_id::text = $1`, resTokens.CorrelacaoID).Scan(&pEntDB, &pEntImgDB, &pSaiDB, &pImgDB); err != nil {
+		t.Fatal(err)
+	}
+	if pEntDB == nil || pEntImgDB == nil || pSaiDB == nil || pImgDB != nil {
+		t.Fatalf("execução por tokens deveria gravar os 3 preços de tokens e preco_imagem=NULL, veio ent=%v entImg=%v sai=%v img=%v", pEntDB, pEntImgDB, pSaiDB, pImgDB)
+	}
+
+	// P5: simulado-imagem com os 3 preços por tokens funciona sem preço por imagem.
+	agoraFixo = agoraFixo.Add(time.Minute)
+	c.pedir("POST", "/api/admin/modelos/"+modSim.ID+"/precos", map[string]any{
+		"unidade": "token_entrada", "precoUsd": 5.0, "vigenciaInicio": "2026-11-01",
+	}, nil)
+	c.pedir("POST", "/api/admin/modelos/"+modSim.ID+"/precos", map[string]any{
+		"unidade": "token_entrada_imagem", "precoUsd": 10.0, "vigenciaInicio": "2026-11-01",
+	}, nil)
+	c.pedir("POST", "/api/admin/modelos/"+modSim.ID+"/precos", map[string]any{
+		"unidade": "token_saida", "precoUsd": 40.0, "vigenciaInicio": "2026-11-01",
+	}, nil)
+	var resSim ResultadoTeste
+	if st := c.pedir("POST", "/api/admin/modelos/"+modSim.ID+"/testar", nil, &resSim); st != 200 {
+		t.Fatalf("testar simulado-imagem com 3 preços esperava 200, veio %d", st)
+	}
+	// 12*5/1e6 + 0*10/1e6 + 1258*40/1e6 = 0.00006 + 0.05032 = 0.05038.
+	if resSim.CustoUsd != 0.05038 || resSim.BasePreco == nil || *resSim.BasePreco != "tokens" ||
+		resSim.TokensEntrada != 12 || resSim.TokensEntradaImagem == nil || *resSim.TokensEntradaImagem != 0 || resSim.TokensSaida != 1258 {
+		t.Fatalf("simulado-imagem por tokens inesperado: %+v", resSim)
+	}
+
+	// Histórico legado (anterior à 0007): preserva custo e deriva base "imagem" mesmo se preco_token_entrada estiver preenchido.
+	agoraFixo = agoraFixo.Add(time.Minute)
+	if _, err := api.banco.Exec(context.Background(), `
+		INSERT INTO ia_execucoes (
+			correlacao_id, atividade, fornecedor_id, modelo_id, fornecedor_nome, modelo_identificador,
+			status, tokens_entrada, tokens_entrada_imagem, tokens_saida, imagens,
+			preco_token_entrada, preco_imagem, custo_usd, criado_em
+		)
+		VALUES (gen_random_uuid(), 'teste', $1, $2, $3, $4, 'ok', 12, NULL, 1258, 1, 5.0, 5.0, 5.0, $5)`,
+		fornOAI.ID, modOAI.ID, fornOAI.Nome, modOAI.Identificador, agoraFixo); err != nil {
+		t.Fatal(err)
+	}
+
+	var execs RespostaExecucoes
+	if st := c.pedir("GET", "/api/admin/execucoes?limite=10", nil, &execs); st != 200 || len(execs.Execucoes) != 4 {
+		t.Fatalf("GET execuções inesperado: %d len=%d", st, len(execs.Execucoes))
+	}
+	if execs.Execucoes[0].CustoUsd != 5.0 || execs.Execucoes[0].TokensEntradaImagem != nil ||
+		execs.Execucoes[0].BasePreco == nil || *execs.Execucoes[0].BasePreco != "imagem" {
+		t.Fatalf("registro legado inesperado: %+v", execs.Execucoes[0])
+	}
+	if execs.Execucoes[1].BasePreco == nil || *execs.Execucoes[1].BasePreco != "tokens" ||
+		execs.Execucoes[1].TokensEntradaImagem == nil || *execs.Execucoes[1].TokensEntradaImagem != 0 {
+		t.Fatalf("registro simulado por tokens inesperado: %+v", execs.Execucoes[1])
+	}
+	if execs.Execucoes[2].BasePreco == nil || *execs.Execucoes[2].BasePreco != "tokens" ||
+		execs.Execucoes[2].TokensEntradaImagem == nil || *execs.Execucoes[2].TokensEntradaImagem != 500 {
+		t.Fatalf("registro OpenAI por tokens inesperado: %+v", execs.Execucoes[2])
+	}
+	if execs.Execucoes[3].BasePreco == nil || *execs.Execucoes[3].BasePreco != "imagem" {
+		t.Fatalf("registro fallback por imagem inesperado: %+v", execs.Execucoes[3])
 	}
 }

@@ -54,10 +54,11 @@ type respostaTextoIA struct {
 }
 
 type respostaImagemIA struct {
-	ImagemDataUrl string
-	TokensEntrada int
-	TokensSaida   int
-	Imagens       int
+	ImagemDataUrl       string
+	TokensEntrada       int
+	TokensEntradaImagem int
+	TokensSaida         int
+	Imagens             int
 }
 
 type conectorIA interface {
@@ -116,10 +117,11 @@ func (c *conectorSimulado) gerarImagem(_ context.Context, modelo, _ string) (res
 		}
 	}
 	return respostaImagemIA{
-		ImagemDataUrl: pngAzulSimulado,
-		TokensEntrada: 0,
-		TokensSaida:   0,
-		Imagens:       1,
+		ImagemDataUrl:       pngAzulSimulado,
+		TokensEntrada:       12,
+		TokensEntradaImagem: 0,
+		TokensSaida:         1258,
+		Imagens:             1,
 	}, nil
 }
 
@@ -194,8 +196,12 @@ func (c *conectorOpenAI) gerarImagem(ctx context.Context, modelo, prompt string)
 			B64JSON string `json:"b64_json"`
 		} `json:"data"`
 		Usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+			InputTokens        int `json:"input_tokens"`
+			OutputTokens       int `json:"output_tokens"`
+			InputTokensDetails *struct {
+				TextTokens  *int `json:"text_tokens"`
+				ImageTokens *int `json:"image_tokens"`
+			} `json:"input_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := fazerPedidoJSON(ctx, c.cliente, http.MethodPost, c.endereco+"/images/generations", c.cabecalhos(), corpo, &resp, limiteRespostaImagem); err != nil {
@@ -215,11 +221,26 @@ func (c *conectorOpenAI) gerarImagem(ctx context.Context, modelo, prompt string)
 	if err := validarTokensFornecedor(resp.Usage.InputTokens, resp.Usage.OutputTokens); err != nil {
 		return respostaImagemIA{}, err
 	}
+	tokensTexto := resp.Usage.InputTokens
+	tokensImagem := 0
+	if d := resp.Usage.InputTokensDetails; d != nil && (d.TextTokens != nil || d.ImageTokens != nil) {
+		tokensTexto = 0
+		if d.TextTokens != nil {
+			tokensTexto = *d.TextTokens
+		}
+		if d.ImageTokens != nil {
+			tokensImagem = *d.ImageTokens
+		}
+		if err := validarTokensFornecedor(tokensTexto, tokensImagem); err != nil {
+			return respostaImagemIA{}, err
+		}
+	}
 	return respostaImagemIA{
-		ImagemDataUrl: "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(brutoImg),
-		TokensEntrada: resp.Usage.InputTokens,
-		TokensSaida:   resp.Usage.OutputTokens,
-		Imagens:       len(resp.Data),
+		ImagemDataUrl:       "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(brutoImg),
+		TokensEntrada:       tokensTexto,
+		TokensEntradaImagem: tokensImagem,
+		TokensSaida:         resp.Usage.OutputTokens,
+		Imagens:             len(resp.Data),
 	}, nil
 }
 
