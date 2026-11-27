@@ -25,5 +25,6 @@ Projetos têm **começo, fim e entrega**. Quando terminam, vão para [[Índice -
 | Plataforma Laura Growth (spec da etapa 2C) | aprovado | [[Especificação - Etapa 2C]] |
 | Plataforma Laura Growth (relatório da etapa 2C) | em validação | [[Relatório - Etapa 2C]] |
 | Plataforma Laura Growth (spec dos ajustes da 2A-1) | aprovado | [[Especificação - Ajustes 2A-1]] |
+| Plataforma Laura Growth (relatório dos ajustes da 2A-1) | em validação | [[Relatório - Ajustes 2A-1]] |
 
 Modelo para novos: [[Template - Projeto]] · Voltar: [[Home]]
