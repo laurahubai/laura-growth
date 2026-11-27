@@ -27,5 +27,6 @@ Projetos têm **começo, fim e entrega**. Quando terminam, vão para [[Índice -
 | Plataforma Laura Growth (spec dos ajustes da 2A-1) | aprovado | [[Especificação - Ajustes 2A-1]] |
 | Plataforma Laura Growth (relatório dos ajustes da 2A-1) | em validação | [[Relatório - Ajustes 2A-1]] |
 | Plataforma Laura Growth (spec dos preços de imagem por tokens) | aprovado | [[Especificação - Preços de Imagem por Tokens]] |
+| Plataforma Laura Growth (relatório dos preços de imagem por tokens) | em validação | [[Relatório - Preços de Imagem por Tokens]] |
 
 Modelo para novos: [[Template - Projeto]] · Voltar: [[Home]]
