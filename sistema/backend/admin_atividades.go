@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const (
@@ -256,6 +257,11 @@ func (a *API) salvarRotaAtividade(w http.ResponseWriter, r *http.Request, _ cont
 			modelo_reserva_id = EXCLUDED.modelo_reserva_id,
 			atualizado_em = now()`,
 		def.Codigo, p.ModeloPrincipalID, p.ModeloReservaID); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			erro(w, 404, "nao_encontrado", "Modelo não encontrado.")
+			return
+		}
 		falhaInterna(w, err)
 		return
 	}
@@ -314,7 +320,7 @@ func (a *API) testarModelo(w http.ResponseWriter, r *http.Request, s contextoSes
 	if err != nil {
 		var ef *erroFornecedor
 		if errors.As(err, &ef) {
-			erro(w, 502, ef.codigo, ef.mensagem)
+			erro(w, 422, ef.codigo, ef.mensagem)
 			return
 		}
 		var ee *erroEnderecoExecucao
@@ -636,7 +642,7 @@ func (a *API) executarAtividadeInterna(ctx context.Context, atividade, orgID, us
 		}
 		return ResultadoAtividade{}, 409, "limite_atingido", msgLimite
 	}
-	return ResultadoAtividade{}, 502, "atividade_falhou", resumirErroTentativas(tentativas)
+	return ResultadoAtividade{}, 422, "atividade_falhou", resumirErroTentativas(tentativas)
 }
 
 func resumirErroTentativas(tentativas []Tentativa) string {

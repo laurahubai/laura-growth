@@ -812,4 +812,23 @@ func TestJ4ExcluirFornecedor(t *testing.T) {
 		execs.Execucoes[0].FornecedorNome != "Fornecedor Principal Excluir" || execs.Execucoes[0].ModeloIdentificador != "simulado-texto" {
 		t.Fatalf("GET /api/admin/execucoes após exclusão inesperado: %d %+v", st, execs.Execucoes)
 	}
+
+	// 5. Mapeamento de violação de FK (23503) em corrida na exclusão -> 409 fornecedor_em_uso.
+	if _, err := api.banco.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION simular_fk_exclusao_forn_teste() RETURNS trigger AS $$
+		BEGIN
+			RAISE EXCEPTION 'violacao fk simulada' USING ERRCODE = '23503';
+		END;
+		$$ LANGUAGE plpgsql;
+		CREATE TRIGGER trg_simular_fk_exclusao_forn_teste
+		BEFORE DELETE ON ia_modelos
+		FOR EACH ROW EXECUTE FUNCTION simular_fk_exclusao_forn_teste();`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = api.banco.Exec(ctx, `DROP TRIGGER IF EXISTS trg_simular_fk_exclusao_forn_teste ON ia_modelos; DROP FUNCTION IF EXISTS simular_fk_exclusao_forn_teste();`)
+	}()
+	if stFK, bodyFK := c.pedirComCorpo("DELETE", "/api/admin/fornecedores/"+fornReserva.ID, nil); stFK != 409 || !strings.Contains(string(bodyFK), "fornecedor_em_uso") {
+		t.Fatalf("FK 23503 ao excluir fornecedor esperava 409 fornecedor_em_uso, veio %d (%s)", stFK, bodyFK)
+	}
 }

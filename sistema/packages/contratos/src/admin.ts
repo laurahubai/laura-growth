@@ -130,7 +130,7 @@ export type PedidoEditarFornecedor = z.infer<typeof PedidoEditarFornecedor>;
 // Erros: 404 nao_encontrado; 409 fornecedor_em_uso (atividade usa modelo deste fornecedor).
 
 // POST /api/admin/fornecedores/{id}/ler-modelos (sem corpo) -> 200
-// Erros com mensagem clara e sem a chave: 502 fornecedor_recusou_chave | fornecedor_indisponivel |
+// Erros com mensagem clara e sem a chave: 422 fornecedor_recusou_chave | fornecedor_indisponivel |
 // fornecedor_erro; 400 endereco_invalido; 409 fornecedor_inativo.
 export const RespostaLerModelos = z.object({
   modelos: z.array(z.object({ identificador: z.string(), jaCadastrado: z.boolean() })),
@@ -220,7 +220,7 @@ export type ModeloResumo = z.infer<typeof ModeloResumo>;
 
 // POST /api/admin/modelos/{id}/testar (sem corpo) -> 200
 // Texto envia "Oi, qual modelo é você?"; imagem pede "um círculo azul sobre fundo branco".
-// Erros: 409 sem_preco | limite_atingido | modelo_inativo; 502 fornecedor_* (mensagem clara, sem a chave).
+// Erros: 409 sem_preco | limite_atingido | modelo_inativo; 422 fornecedor_* (mensagem clara, sem a chave).
 export const ResultadoTeste = z.object({
   execucaoId: z.string(),
   servico: Servico,
@@ -287,7 +287,7 @@ export type PedidoRotaAtividade = z.infer<typeof PedidoRotaAtividade>;
 // Roda a atividade como uma atividade de verdade: principal, e reserva se o principal falhar ou estiver no limite.
 // Erros: 409 atividade_incompleta (mensagem diz o que falta, AC36);
 //        409 limite_atingido (principal e reserva no limite, AC34);
-//        502 atividade_falhou (principal e reserva falharam; registros gravados).
+//        422 atividade_falhou (principal e reserva falharam; registros gravados).
 export const Tentativa = z.object({
   modelo: ModeloResumo,
   status: z.enum(["ok", "falha", "pulado_limite"]),

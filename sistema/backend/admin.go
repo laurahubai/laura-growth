@@ -397,39 +397,13 @@ func (a *API) excluirFornecedor(w http.ResponseWriter, r *http.Request, s contex
 		return
 	}
 
-	linhas, err := tx.Query(r.Context(), `
-		SELECT DISTINCT r.atividade
-		FROM ia_rotas r
-		JOIN ia_modelos m ON m.id = r.modelo_principal_id OR m.id = r.modelo_reserva_id
-		WHERE m.fornecedor_id = $1::uuid
-		ORDER BY r.atividade`, id)
+	emUso, err := a.atividadesEmUsoFornecedor(r.Context(), tx, id)
 	if err != nil {
 		falhaInterna(w, err)
 		return
 	}
-	var emUso []string
-	for linhas.Next() {
-		var cod string
-		if err := linhas.Scan(&cod); err != nil {
-			linhas.Close()
-			falhaInterna(w, err)
-			return
-		}
-		nomeAtv := cod
-		if def, ok := mapaAtividades[cod]; ok {
-			nomeAtv = def.Nome
-		}
-		emUso = append(emUso, nomeAtv)
-	}
-	if err := linhas.Err(); err != nil {
-		linhas.Close()
-		falhaInterna(w, err)
-		return
-	}
-	linhas.Close()
-
 	if len(emUso) > 0 {
-		erro(w, 409, "fornecedor_em_uso", "Este fornecedor está em uso nas atividades: "+strings.Join(emUso, ", ")+". Troque o modelo antes de excluir.")
+		erro(w, 409, "fornecedor_em_uso", mensagemFornecedorEmUso(emUso))
 		return
 	}
 
@@ -438,6 +412,17 @@ func (a *API) excluirFornecedor(w http.ResponseWriter, r *http.Request, s contex
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `DELETE FROM ia_modelos WHERE fornecedor_id = $1::uuid`, id); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			_ = tx.Rollback(r.Context())
+			emUsoAtual, errConsulta := a.atividadesEmUsoFornecedor(r.Context(), a.banco, id)
+			if errConsulta != nil || len(emUsoAtual) == 0 {
+				erro(w, 409, "fornecedor_em_uso", "Este fornecedor está em uso em uma atividade. Troque o modelo antes de excluir.")
+				return
+			}
+			erro(w, 409, "fornecedor_em_uso", mensagemFornecedorEmUso(emUsoAtual))
+			return
+		}
 		falhaInterna(w, err)
 		return
 	}
@@ -452,6 +437,44 @@ func (a *API) excluirFornecedor(w http.ResponseWriter, r *http.Request, s contex
 
 	slog.Info("fornecedor excluído", "fornecedorId", id, "usuarioId", s.usuario.ID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type consultorSQL interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+func (a *API) atividadesEmUsoFornecedor(ctx context.Context, q consultorSQL, fornecedorID string) ([]string, error) {
+	linhas, err := q.Query(ctx, `
+		SELECT DISTINCT r.atividade
+		FROM ia_rotas r
+		JOIN ia_modelos m ON m.id = r.modelo_principal_id OR m.id = r.modelo_reserva_id
+		WHERE m.fornecedor_id = $1::uuid
+		ORDER BY r.atividade`, fornecedorID)
+	if err != nil {
+		return nil, err
+	}
+	defer linhas.Close()
+
+	var emUso []string
+	for linhas.Next() {
+		var cod string
+		if err := linhas.Scan(&cod); err != nil {
+			return nil, err
+		}
+		nomeAtv := cod
+		if def, ok := mapaAtividades[cod]; ok {
+			nomeAtv = def.Nome
+		}
+		emUso = append(emUso, nomeAtv)
+	}
+	if err := linhas.Err(); err != nil {
+		return nil, err
+	}
+	return emUso, nil
+}
+
+func mensagemFornecedorEmUso(emUso []string) string {
+	return "Este fornecedor está em uso nas atividades: " + strings.Join(emUso, ", ") + ". Troque o modelo antes de excluir."
 }
 
 func (a *API) carregarFornecedor(ctx context.Context, id string) (Fornecedor, error) {

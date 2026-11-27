@@ -208,11 +208,11 @@ func responderErroFornecedor(w http.ResponseWriter, fornecedorID string, err err
 	var ef *erroFornecedor
 	if errors.As(err, &ef) {
 		slog.Warn("falha ao consultar fornecedor", "fornecedorId", fornecedorID, "codigo", ef.codigo)
-		erro(w, 502, ef.codigo, ef.mensagem)
+		erro(w, 422, ef.codigo, ef.mensagem)
 		return
 	}
 	slog.Warn("falha inesperada ao consultar fornecedor", "fornecedorId", fornecedorID)
-	erro(w, 502, "fornecedor_erro", "Não foi possível completar a consulta no fornecedor.")
+	erro(w, 422, "fornecedor_erro", "Não foi possível completar a consulta no fornecedor.")
 }
 
 // ---- Modelos ----

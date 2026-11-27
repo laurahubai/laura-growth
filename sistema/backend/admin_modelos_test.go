@@ -140,11 +140,11 @@ func TestAC38LerModelosOpenAIAnthropicESimulado(t *testing.T) {
 		t.Fatalf("jaCadastrado esperado [true, false], veio %+v", lidos.Modelos)
 	}
 
-	// OpenAI 401 -> 502 fornecedor_recusou_chave sem vazar chave na resposta nem no log.
+	// OpenAI 401 -> 422 fornecedor_recusou_chave sem vazar chave na resposta nem no log.
 	modoOpenAI.Store(1)
 	st, body := c.pedirComCorpo("POST", "/api/admin/fornecedores/"+fornOAI.ID+"/ler-modelos", nil)
-	if st != 502 || !strings.Contains(string(body), "fornecedor_recusou_chave") {
-		t.Fatalf("OpenAI 401 esperava 502 fornecedor_recusou_chave, veio %d (%s)", st, body)
+	if st != 422 || !strings.Contains(string(body), "fornecedor_recusou_chave") {
+		t.Fatalf("OpenAI 401 esperava 422 fornecedor_recusou_chave, veio %d (%s)", st, body)
 	}
 	if bytes.Contains(body, []byte(chaveAPITeste)) {
 		t.Fatalf("resposta 401 vazou a chave: %s", body)
@@ -162,21 +162,21 @@ func TestAC38LerModelosOpenAIAnthropicESimulado(t *testing.T) {
 
 	modoAnthropic.Store(1)
 	st, body = c.pedirComCorpo("POST", "/api/admin/fornecedores/"+fornAnt.ID+"/ler-modelos", nil)
-	if st != 502 || !strings.Contains(string(body), "fornecedor_recusou_chave") || bytes.Contains(body, []byte(chaveAPINovaTeste)) {
+	if st != 422 || !strings.Contains(string(body), "fornecedor_recusou_chave") || bytes.Contains(body, []byte(chaveAPINovaTeste)) {
 		t.Fatalf("Anthropic 401 inesperado: %d (%s)", st, body)
 	}
 
 	modoAnthropic.Store(2)
 	st, body = c.pedirComCorpo("POST", "/api/admin/fornecedores/"+fornAnt.ID+"/ler-modelos", nil)
-	if st != 502 || !strings.Contains(string(body), "fornecedor_indisponivel") {
-		t.Fatalf("Anthropic 503 esperava 502 fornecedor_indisponivel, veio %d (%s)", st, body)
+	if st != 422 || !strings.Contains(string(body), "fornecedor_indisponivel") {
+		t.Fatalf("Anthropic 503 esperava 422 fornecedor_indisponivel, veio %d (%s)", st, body)
 	}
 
-	// Servidor fora do ar (fechado) -> 502 fornecedor_indisponivel.
+	// Servidor fora do ar (fechado) -> 422 fornecedor_indisponivel.
 	srvAnthropic.Close()
 	st, body = c.pedirComCorpo("POST", "/api/admin/fornecedores/"+fornAnt.ID+"/ler-modelos", nil)
-	if st != 502 || !strings.Contains(string(body), "fornecedor_indisponivel") || bytes.Contains(body, []byte(chaveAPINovaTeste)) {
-		t.Fatalf("Anthropic fora do ar esperava 502 fornecedor_indisponivel, veio %d (%s)", st, body)
+	if st != 422 || !strings.Contains(string(body), "fornecedor_indisponivel") || bytes.Contains(body, []byte(chaveAPINovaTeste)) {
+		t.Fatalf("Anthropic fora do ar esperava 422 fornecedor_indisponivel, veio %d (%s)", st, body)
 	}
 
 	// Simulado funciona offline.

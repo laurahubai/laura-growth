@@ -427,17 +427,17 @@ func TestAC30UsoSoDaCasaERotas403S3(t *testing.T) {
 		t.Fatalf("org vazia não deveria usar principal 'casa', veio st=%d %+v", st, resVazia)
 	}
 
-	// Se reserva também for "casa", recusa para organização de fora da casa (502 atividade_falhou) e para org vazia.
+	// Se reserva também for "casa", recusa para organização de fora da casa (422 atividade_falhou) e para org vazia.
 	c.pedir("PUT", "/api/admin/atividades/revisao", map[string]any{
 		"modeloPrincipalId": modCasa, "modeloReservaId": criarComPreco(fornCasa.ID, "simulado-casa-2"),
 	}, nil)
 	_, st, cod, _ := api.executarAtividade(context.Background(), "revisao", alheiaID, "", "Oi")
-	if st != 502 || cod != "atividade_falhou" {
-		t.Fatalf("dois modelos 'casa' para org externa esperava 502 atividade_falhou, veio %d %s", st, cod)
+	if st != 422 || cod != "atividade_falhou" {
+		t.Fatalf("dois modelos 'casa' para org externa esperava 422 atividade_falhou, veio %d %s", st, cod)
 	}
 	_, st, cod, _ = api.executarAtividade(context.Background(), "revisao", "", "", "Oi")
-	if st != 502 || cod != "atividade_falhou" {
-		t.Fatalf("dois modelos 'casa' para org vazia esperava 502 atividade_falhou, veio %d %s", st, cod)
+	if st != 422 || cod != "atividade_falhou" {
+		t.Fatalf("dois modelos 'casa' para org vazia esperava 422 atividade_falhou, veio %d %s", st, cod)
 	}
 
 	// Pessoa comum recebe 403 em todas as novas rotas da S3.
@@ -596,10 +596,10 @@ func TestFalhaDecifrarChaveRegistraExecucaoECaiNaReserva(t *testing.T) {
 		t.Fatalf("registro no banco inesperado: status=%q erro=%q", statusDB, erroDB)
 	}
 
-	// Testar modelo diretamente também grava falha e devolve 502 com a mensagem fixa.
+	// Testar modelo diretamente também grava falha e devolve 422 com a mensagem fixa.
 	st, body := c.pedirComCorpo("POST", "/api/admin/modelos/"+modExt.ID+"/testar", nil)
-	if st != 502 || !strings.Contains(string(body), msgEsperada) {
-		t.Fatalf("testar modelo com chave corrompida esperava 502 com mensagem fixa, veio %d (%s)", st, body)
+	if st != 422 || !strings.Contains(string(body), msgEsperada) {
+		t.Fatalf("testar modelo com chave corrompida esperava 422 com mensagem fixa, veio %d (%s)", st, body)
 	}
 	var totalFalhas int
 	if err := api.banco.QueryRow(ctx, `
@@ -845,10 +845,10 @@ func TestJ2EJ3Erro400FornecedorEAtividadeSemReserva(t *testing.T) {
 
 	const msgEsperada = "O fornecedor retornou um erro (400)."
 
-	// J2: testar modelo com resposta 400 do fornecedor devolve a mensagem segura gravada em ia_execucoes.erro.
+	// J2: testar modelo com resposta 400 do fornecedor devolve status 422 e a mensagem segura gravada em ia_execucoes.erro.
 	stMod, bodyMod := c.pedirComCorpo("POST", "/api/admin/modelos/"+modImg.ID+"/testar", nil)
-	if stMod != 502 {
-		t.Fatalf("testar modelo 400 esperava 502, veio %d (%s)", stMod, bodyMod)
+	if stMod != 422 {
+		t.Fatalf("testar modelo 400 esperava 422, veio %d (%s)", stMod, bodyMod)
 	}
 	var errRespMod map[string]string
 	if err := json.Unmarshal(bodyMod, &errRespMod); err != nil || errRespMod["mensagem"] != msgEsperada {
@@ -858,7 +858,7 @@ func TestJ2EJ3Erro400FornecedorEAtividadeSemReserva(t *testing.T) {
 		t.Fatalf("resposta do teste de modelo vazou corpo bruto ou chave: %s", bodyMod)
 	}
 
-	// J3 + J2: atividade configurada apenas com principal (sem reserva) fica pronta e, ao falhar, devolve o erro do principal com 1 tentativa.
+	// J3 + J2: atividade configurada apenas com principal (sem reserva) fica pronta e, ao falhar, devolve 422 com o erro do principal.
 	var rota RotaAtividade
 	if st := c.pedir("PUT", "/api/admin/atividades/imagem", map[string]any{
 		"modeloPrincipalId": modImg.ID, "modeloReservaId": nil,
@@ -866,8 +866,8 @@ func TestJ2EJ3Erro400FornecedorEAtividadeSemReserva(t *testing.T) {
 		t.Fatalf("PUT imagem sem reserva esperava pronta=true, veio %d %+v", st, rota)
 	}
 	stAtv, bodyAtv := c.pedirComCorpo("POST", "/api/admin/atividades/imagem/testar", nil)
-	if stAtv != 502 {
-		t.Fatalf("testar atividade 400 esperava 502, veio %d (%s)", stAtv, bodyAtv)
+	if stAtv != 422 {
+		t.Fatalf("testar atividade 400 esperava 422, veio %d (%s)", stAtv, bodyAtv)
 	}
 	var errRespAtv map[string]string
 	if err := json.Unmarshal(bodyAtv, &errRespAtv); err != nil || errRespAtv["codigo"] != "atividade_falhou" || errRespAtv["mensagem"] != msgEsperada {
@@ -888,6 +888,37 @@ func TestJ2EJ3Erro400FornecedorEAtividadeSemReserva(t *testing.T) {
 		}
 	}
 
+	// J2 + resumirErroTentativas: quando principal e reserva falham, devolve 422 com os erros de ambas as tentativas.
+	var modImgRes Modelo
+	if st := c.pedir("POST", "/api/admin/fornecedores/"+forn.ID+"/modelos", map[string]any{
+		"identificador": "gpt-image-1-reserva", "servico": "imagem", "origem": "manual",
+	}, &modImgRes); st != 201 {
+		t.Fatalf("criar modelo reserva falhou: %d", st)
+	}
+	if st := c.pedir("POST", "/api/admin/modelos/"+modImgRes.ID+"/precos", map[string]any{
+		"unidade": "imagem", "precoUsd": 0.04, "vigenciaInicio": "2026-11-01",
+	}, nil); st != 201 {
+		t.Fatalf("criar preço reserva falhou: %d", st)
+	}
+	if st := c.pedir("PUT", "/api/admin/atividades/imagem", map[string]any{
+		"modeloPrincipalId": modImg.ID, "modeloReservaId": modImgRes.ID,
+	}, nil); st != 200 {
+		t.Fatalf("PUT imagem com reserva falhou: %d", st)
+	}
+	stDuplo, bodyDuplo := c.pedirComCorpo("POST", "/api/admin/atividades/imagem/testar", nil)
+	if stDuplo != 422 {
+		t.Fatalf("testar atividade com principal+reserva falhando esperava 422, veio %d (%s)", stDuplo, bodyDuplo)
+	}
+	var errRespDuplo map[string]string
+	if err := json.Unmarshal(bodyDuplo, &errRespDuplo); err != nil || errRespDuplo["codigo"] != "atividade_falhou" ||
+		!strings.Contains(errRespDuplo["mensagem"], "Principal (chatgpt-image-latest): "+msgEsperada) ||
+		!strings.Contains(errRespDuplo["mensagem"], "Reserva (gpt-image-1-res") {
+		t.Fatalf("mensagem de falha dupla inesperada: %s", bodyDuplo)
+	}
+	if !strings.Contains(errRespDuplo["mensagem"], "Reserva (gpt-image-1-reserva): "+msgEsperada) {
+		t.Fatalf("mensagem de falha dupla deveria citar modelo reserva completo: %s", bodyDuplo)
+	}
+
 	// J3: caminho de sucesso e limite em atividade sem reserva usando simulado.
 	_, modTxt, _, _, _, _ := prepararSimuladosCompletos(t, c)
 	if st := c.pedir("PUT", "/api/admin/atividades/texto", map[string]any{
@@ -905,5 +936,26 @@ func TestJ2EJ3Erro400FornecedorEAtividadeSemReserva(t *testing.T) {
 	if stLim, bodyLim := c.pedirComCorpo("POST", "/api/admin/atividades/texto/testar", nil); stLim != 409 ||
 		!strings.Contains(string(bodyLim), "limite_atingido") || !strings.Contains(string(bodyLim), "modelo principal") {
 		t.Fatalf("principal sem reserva no limite esperava 409 limite_atingido, veio %d (%s)", stLim, bodyLim)
+	}
+
+	// Mapeamento de violação de FK (23503) ao salvar rota de modelo recém-excluído -> 404 nao_encontrado.
+	if _, err := api.banco.Exec(context.Background(), `
+		CREATE OR REPLACE FUNCTION simular_fk_rota_teste() RETURNS trigger AS $$
+		BEGIN
+			RAISE EXCEPTION 'violacao fk simulada' USING ERRCODE = '23503';
+		END;
+		$$ LANGUAGE plpgsql;
+		CREATE TRIGGER trg_simular_fk_rota_teste
+		BEFORE INSERT OR UPDATE ON ia_rotas
+		FOR EACH ROW EXECUTE FUNCTION simular_fk_rota_teste();`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = api.banco.Exec(context.Background(), `DROP TRIGGER IF EXISTS trg_simular_fk_rota_teste ON ia_rotas; DROP FUNCTION IF EXISTS simular_fk_rota_teste();`)
+	}()
+	if stFK, bodyFK := c.pedirComCorpo("PUT", "/api/admin/atividades/plano", map[string]any{
+		"modeloPrincipalId": modTxt, "modeloReservaId": nil,
+	}); stFK != 404 || !strings.Contains(string(bodyFK), "nao_encontrado") {
+		t.Fatalf("FK 23503 ao salvar rota esperava 404 nao_encontrado, veio %d (%s)", stFK, bodyFK)
 	}
 }
