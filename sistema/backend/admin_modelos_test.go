@@ -140,11 +140,11 @@ func TestAC38LerModelosOpenAIAnthropicESimulado(t *testing.T) {
 		t.Fatalf("jaCadastrado esperado [true, false], veio %+v", lidos.Modelos)
 	}
 
-	// OpenAI 401 -> 502 fornecedor_recusou_chave sem vazar chave na resposta nem no log.
+	// OpenAI 401 -> 422 fornecedor_recusou_chave sem vazar chave na resposta nem no log.
 	modoOpenAI.Store(1)
 	st, body := c.pedirComCorpo("POST", "/api/admin/fornecedores/"+fornOAI.ID+"/ler-modelos", nil)
-	if st != 502 || !strings.Contains(string(body), "fornecedor_recusou_chave") {
-		t.Fatalf("OpenAI 401 esperava 502 fornecedor_recusou_chave, veio %d (%s)", st, body)
+	if st != 422 || !strings.Contains(string(body), "fornecedor_recusou_chave") {
+		t.Fatalf("OpenAI 401 esperava 422 fornecedor_recusou_chave, veio %d (%s)", st, body)
 	}
 	if bytes.Contains(body, []byte(chaveAPITeste)) {
 		t.Fatalf("resposta 401 vazou a chave: %s", body)
@@ -162,21 +162,21 @@ func TestAC38LerModelosOpenAIAnthropicESimulado(t *testing.T) {
 
 	modoAnthropic.Store(1)
 	st, body = c.pedirComCorpo("POST", "/api/admin/fornecedores/"+fornAnt.ID+"/ler-modelos", nil)
-	if st != 502 || !strings.Contains(string(body), "fornecedor_recusou_chave") || bytes.Contains(body, []byte(chaveAPINovaTeste)) {
+	if st != 422 || !strings.Contains(string(body), "fornecedor_recusou_chave") || bytes.Contains(body, []byte(chaveAPINovaTeste)) {
 		t.Fatalf("Anthropic 401 inesperado: %d (%s)", st, body)
 	}
 
 	modoAnthropic.Store(2)
 	st, body = c.pedirComCorpo("POST", "/api/admin/fornecedores/"+fornAnt.ID+"/ler-modelos", nil)
-	if st != 502 || !strings.Contains(string(body), "fornecedor_indisponivel") {
-		t.Fatalf("Anthropic 503 esperava 502 fornecedor_indisponivel, veio %d (%s)", st, body)
+	if st != 422 || !strings.Contains(string(body), "fornecedor_indisponivel") {
+		t.Fatalf("Anthropic 503 esperava 422 fornecedor_indisponivel, veio %d (%s)", st, body)
 	}
 
-	// Servidor fora do ar (fechado) -> 502 fornecedor_indisponivel.
+	// Servidor fora do ar (fechado) -> 422 fornecedor_indisponivel.
 	srvAnthropic.Close()
 	st, body = c.pedirComCorpo("POST", "/api/admin/fornecedores/"+fornAnt.ID+"/ler-modelos", nil)
-	if st != 502 || !strings.Contains(string(body), "fornecedor_indisponivel") || bytes.Contains(body, []byte(chaveAPINovaTeste)) {
-		t.Fatalf("Anthropic fora do ar esperava 502 fornecedor_indisponivel, veio %d (%s)", st, body)
+	if st != 422 || !strings.Contains(string(body), "fornecedor_indisponivel") || bytes.Contains(body, []byte(chaveAPINovaTeste)) {
+		t.Fatalf("Anthropic fora do ar esperava 422 fornecedor_indisponivel, veio %d (%s)", st, body)
 	}
 
 	// Simulado funciona offline.
@@ -265,12 +265,14 @@ func TestConectoresGeracaoTextoEImagem(t *testing.T) {
 			prompt, _ := reqBody["prompt"].(string)
 			modeloReq, _ := reqBody["model"].(string)
 			_, temResponseFormat := reqBody["response_format"]
-			if strings.HasPrefix(modeloReq, "gpt-image-") && temResponseFormat {
+			if strings.HasPrefix(strings.ToLower(modeloReq), "dall-e-") {
+				if reqBody["response_format"] != "b64_json" {
+					w.WriteHeader(400)
+					return
+				}
+			} else if temResponseFormat {
 				w.WriteHeader(400)
-				return
-			}
-			if !strings.HasPrefix(modeloReq, "gpt-image-") && reqBody["response_format"] != "b64_json" {
-				w.WriteHeader(400)
+				_, _ = w.Write([]byte(`{"error":{"message":"Unknown parameter: 'response_format'."}}`))
 				return
 			}
 			switch prompt {
@@ -322,7 +324,11 @@ func TestConectoresGeracaoTextoEImagem(t *testing.T) {
 	if err != nil || rtOAI.Texto != "Sou gpt-4o" || rtOAI.TokensEntrada != 10 || rtOAI.TokensSaida != 25 {
 		t.Fatalf("OpenAI gerarTexto inesperado: %+v err=%v", rtOAI, err)
 	}
-	// gpt-image-* não envia response_format; dall-e-3 envia b64_json.
+	// Apenas dall-e-* envia response_format: b64_json; chatgpt-image-latest e gpt-image-1 não enviam response_format (J1).
+	riChatGPT, err := conOAI.gerarImagem(ctx, "chatgpt-image-latest", "círculo")
+	if err != nil || riChatGPT.ImagemDataUrl != "data:image/png;base64,"+imgBase64 || riChatGPT.Imagens != 1 || riChatGPT.TokensEntrada != 5 {
+		t.Fatalf("OpenAI chatgpt-image-latest gerarImagem inesperado: %+v err=%v", riChatGPT, err)
+	}
 	riOAI, err := conOAI.gerarImagem(ctx, "gpt-image-1", "círculo")
 	if err != nil || riOAI.ImagemDataUrl != "data:image/png;base64,"+imgBase64 || riOAI.Imagens != 1 || riOAI.TokensEntrada != 5 {
 		t.Fatalf("OpenAI gpt-image-1 gerarImagem inesperado: %+v err=%v", riOAI, err)

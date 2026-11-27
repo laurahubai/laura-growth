@@ -675,3 +675,160 @@ func TestFornecedoresRegrasLimitesEFuso(t *testing.T) {
 		t.Fatalf("esperava normal abaixo de 80%%, veio %q %v", sit, err)
 	}
 }
+
+func TestJ4ExcluirFornecedor(t *testing.T) {
+	api := novaAPIAdminTeste(t)
+	c := novoCliente(t, api)
+	entrarComoPaulo(t, c)
+
+	// Cria dois fornecedores com modelos e preços.
+	var fornPrincipal, fornReserva Fornecedor
+	if st := c.pedir("POST", "/api/admin/fornecedores", map[string]any{
+		"nome":            "Fornecedor Principal Excluir",
+		"tipo":            "simulado",
+		"limiteMensalUsd": 50,
+	}, &fornPrincipal); st != 201 {
+		t.Fatalf("criar fornecedor principal falhou: %d", st)
+	}
+	if st := c.pedir("POST", "/api/admin/fornecedores", map[string]any{
+		"nome":            "Fornecedor Reserva Excluir",
+		"tipo":            "simulado",
+		"limiteMensalUsd": 50,
+	}, &fornReserva); st != 201 {
+		t.Fatalf("criar fornecedor reserva falhou: %d", st)
+	}
+
+	criarModComPreco := func(fornID, ident string) string {
+		var m Modelo
+		if st := c.pedir("POST", "/api/admin/fornecedores/"+fornID+"/modelos", map[string]any{
+			"identificador": ident, "servico": "texto", "origem": "manual",
+		}, &m); st != 201 {
+			t.Fatalf("criar modelo falhou: %d", st)
+		}
+		if st := c.pedir("POST", "/api/admin/modelos/"+m.ID+"/precos", map[string]any{
+			"unidade": "token_entrada", "precoUsd": 1000, "vigenciaInicio": "2026-11-01",
+		}, nil); st != 201 {
+			t.Fatalf("criar preço entrada falhou: %d", st)
+		}
+		if st := c.pedir("POST", "/api/admin/modelos/"+m.ID+"/precos", map[string]any{
+			"unidade": "token_saida", "precoUsd": 2000, "vigenciaInicio": "2026-11-01",
+		}, nil); st != 201 {
+			t.Fatalf("criar preço saída falhou: %d", st)
+		}
+		return m.ID
+	}
+
+	modPrin := criarModComPreco(fornPrincipal.ID, "simulado-texto")
+	modRes := criarModComPreco(fornReserva.ID, "simulado-texto")
+
+	// Executa um teste em modPrin para gerar registro em ia_execucoes.
+	var resTeste ResultadoTeste
+	if st := c.pedir("POST", "/api/admin/modelos/"+modPrin+"/testar", nil, &resTeste); st != 200 {
+		t.Fatalf("testar modelo falhou: %d", st)
+	}
+
+	// Vincula fornPrincipal como principal de "texto" e "chat_cmo", e fornReserva como reserva de "texto".
+	if st := c.pedir("PUT", "/api/admin/atividades/texto", map[string]any{
+		"modeloPrincipalId": modPrin, "modeloReservaId": modRes,
+	}, nil); st != 200 {
+		t.Fatalf("PUT texto falhou: %d", st)
+	}
+	if st := c.pedir("PUT", "/api/admin/atividades/chat_cmo", map[string]any{
+		"modeloPrincipalId": modPrin, "modeloReservaId": nil,
+	}, nil); st != 200 {
+		t.Fatalf("PUT chat_cmo falhou: %d", st)
+	}
+
+	// 1. Pessoa comum -> 403 sem_permissao.
+	criarUsuarioComum(t, api.banco, "comum-j4@exemplo.com")
+	comum := novoCliente(t, api)
+	comum.pedir("POST", "/api/sessao", map[string]string{"email": "comum-j4@exemplo.com", "senha": senhaTeste}, nil)
+	if st, body := comum.pedirComCorpo("DELETE", "/api/admin/fornecedores/"+fornPrincipal.ID, nil); st != 403 || !strings.Contains(string(body), "sem_permissao") {
+		t.Fatalf("DELETE por pessoa comum esperava 403 sem_permissao, veio %d (%s)", st, body)
+	}
+
+	// 2. ID desconhecido ou inválido -> 404 nao_encontrado.
+	if st, body := c.pedirComCorpo("DELETE", "/api/admin/fornecedores/00000000-0000-0000-0000-000000000000", nil); st != 404 || !strings.Contains(string(body), "nao_encontrado") {
+		t.Fatalf("DELETE id desconhecido esperava 404 nao_encontrado, veio %d (%s)", st, body)
+	}
+	if st, body := c.pedirComCorpo("DELETE", "/api/admin/fornecedores/nao-e-uuid", nil); st != 404 || !strings.Contains(string(body), "nao_encontrado") {
+		t.Fatalf("DELETE id inválido esperava 404 nao_encontrado, veio %d (%s)", st, body)
+	}
+
+	// 3. Em uso (principal ou reserva) -> 409 fornecedor_em_uso citando as atividades e nada apagado.
+	stUso, bodyUso := c.pedirComCorpo("DELETE", "/api/admin/fornecedores/"+fornPrincipal.ID, nil)
+	if stUso != 409 || !strings.Contains(string(bodyUso), "fornecedor_em_uso") ||
+		!strings.Contains(string(bodyUso), "Chat do CMO") || !strings.Contains(string(bodyUso), "Texto") {
+		t.Fatalf("DELETE fornecedor em uso (principal) esperava 409 citando atividades, veio %d (%s)", stUso, bodyUso)
+	}
+	stUsoRes, bodyUsoRes := c.pedirComCorpo("DELETE", "/api/admin/fornecedores/"+fornReserva.ID, nil)
+	if stUsoRes != 409 || !strings.Contains(string(bodyUsoRes), "fornecedor_em_uso") || !strings.Contains(string(bodyUsoRes), "Texto") {
+		t.Fatalf("DELETE fornecedor em uso (reserva) esperava 409 citando Texto, veio %d (%s)", stUsoRes, bodyUsoRes)
+	}
+
+	ctx := context.Background()
+	var qtdModelosAntes int
+	if err := api.banco.QueryRow(ctx, `SELECT count(*) FROM ia_modelos WHERE fornecedor_id::text = $1`, fornPrincipal.ID).Scan(&qtdModelosAntes); err != nil || qtdModelosAntes != 1 {
+		t.Fatalf("modelos do fornecedor bloqueado não deveriam ter sido apagados: %d (%v)", qtdModelosAntes, err)
+	}
+
+	// 4. Desvincula das atividades e exclui -> 204; fornecedor, modelos e preços somem; ia_execucoes permanece com nomes.
+	if st := c.pedir("PUT", "/api/admin/atividades/texto", map[string]any{"modeloPrincipalId": nil, "modeloReservaId": nil}, nil); st != 200 {
+		t.Fatalf("limpar texto falhou: %d", st)
+	}
+	if st := c.pedir("PUT", "/api/admin/atividades/chat_cmo", map[string]any{"modeloPrincipalId": nil, "modeloReservaId": nil}, nil); st != 200 {
+		t.Fatalf("limpar chat_cmo falhou: %d", st)
+	}
+
+	if st, body := c.pedirComCorpo("DELETE", "/api/admin/fornecedores/"+fornPrincipal.ID, nil); st != 204 || len(body) != 0 {
+		t.Fatalf("DELETE fornecedor sem uso esperava 204, veio %d (%s)", st, body)
+	}
+
+	var qtdForn, qtdMod, qtdPreco int
+	if err := api.banco.QueryRow(ctx, `SELECT count(*) FROM ia_fornecedores WHERE id::text = $1`, fornPrincipal.ID).Scan(&qtdForn); err != nil || qtdForn != 0 {
+		t.Fatalf("fornecedor deveria ter sido excluído: %d (%v)", qtdForn, err)
+	}
+	if err := api.banco.QueryRow(ctx, `SELECT count(*) FROM ia_modelos WHERE fornecedor_id::text = $1`, fornPrincipal.ID).Scan(&qtdMod); err != nil || qtdMod != 0 {
+		t.Fatalf("modelos deveriam ter sido excluídos: %d (%v)", qtdMod, err)
+	}
+	if err := api.banco.QueryRow(ctx, `SELECT count(*) FROM ia_precos WHERE modelo_id::text = $1`, modPrin).Scan(&qtdPreco); err != nil || qtdPreco != 0 {
+		t.Fatalf("preços deveriam ter sido excluídos: %d (%v)", qtdPreco, err)
+	}
+
+	var fornNomeExec, modIdentExec string
+	var fornIDExec, modIDExec *string
+	if err := api.banco.QueryRow(ctx, `
+		SELECT fornecedor_id::text, modelo_id::text, fornecedor_nome, modelo_identificador
+		FROM ia_execucoes WHERE id::text = $1`, resTeste.ExecucaoID).
+		Scan(&fornIDExec, &modIDExec, &fornNomeExec, &modIdentExec); err != nil {
+		t.Fatalf("registro de ia_execucoes deveria permanecer após exclusão: %v", err)
+	}
+	if fornIDExec != nil || modIDExec != nil || fornNomeExec != "Fornecedor Principal Excluir" || modIdentExec != "simulado-texto" {
+		t.Fatalf("snapshot em ia_execucoes inesperado após exclusão: fornID=%v modID=%v nome=%q mod=%q", fornIDExec, modIDExec, fornNomeExec, modIdentExec)
+	}
+
+	var execs RespostaExecucoes
+	if st := c.pedir("GET", "/api/admin/execucoes?limite=10", nil, &execs); st != 200 || len(execs.Execucoes) != 1 ||
+		execs.Execucoes[0].FornecedorNome != "Fornecedor Principal Excluir" || execs.Execucoes[0].ModeloIdentificador != "simulado-texto" {
+		t.Fatalf("GET /api/admin/execucoes após exclusão inesperado: %d %+v", st, execs.Execucoes)
+	}
+
+	// 5. Mapeamento de violação de FK (23503) em corrida na exclusão -> 409 fornecedor_em_uso.
+	if _, err := api.banco.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION simular_fk_exclusao_forn_teste() RETURNS trigger AS $$
+		BEGIN
+			RAISE EXCEPTION 'violacao fk simulada' USING ERRCODE = '23503';
+		END;
+		$$ LANGUAGE plpgsql;
+		CREATE TRIGGER trg_simular_fk_exclusao_forn_teste
+		BEFORE DELETE ON ia_modelos
+		FOR EACH ROW EXECUTE FUNCTION simular_fk_exclusao_forn_teste();`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = api.banco.Exec(ctx, `DROP TRIGGER IF EXISTS trg_simular_fk_exclusao_forn_teste ON ia_modelos; DROP FUNCTION IF EXISTS simular_fk_exclusao_forn_teste();`)
+	}()
+	if stFK, bodyFK := c.pedirComCorpo("DELETE", "/api/admin/fornecedores/"+fornReserva.ID, nil); stFK != 409 || !strings.Contains(string(bodyFK), "fornecedor_em_uso") {
+		t.Fatalf("FK 23503 ao excluir fornecedor esperava 409 fornecedor_em_uso, veio %d (%s)", stFK, bodyFK)
+	}
+}

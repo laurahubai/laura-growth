@@ -232,6 +232,82 @@ test("caminho principal da Administração de IA: fornecedor simulado, modelos, 
   await expect(linhaRegReserva).toContainText("Simulado");
   await expect(linhaRegReserva.locator("td").nth(9)).toHaveText("12 / 18");
   await expect(linhaRegReserva.locator("td").nth(11)).toHaveText("US$ 0,000063");
+
+  // J3: reserva opcional na tela de Atividades (salva e testa apenas com principal).
+  await menuAdmin.getByRole("link", { name: "Atividades" }).click();
+  await expect(page).toHaveURL(/\/admin\/atividades$/);
+  await expect(page.getByRole("columnheader", { name: "Reserva (opcional)" })).toBeVisible();
+
+  await selectPrincipal.selectOption({ label: `${nomeFornecedor} — simulado-texto (Simulado)` });
+  await selectReserva.selectOption("");
+  await linhaAtividadeTexto.getByRole("button", { name: "Salvar" }).click();
+  await expect(linhaAtividadeTexto.getByText("Pronta", { exact: true })).toBeVisible();
+  await linhaAtividadeTexto.getByRole("button", { name: "Testar atividade" }).click();
+  await expect(resultadoAtiv).toContainText("Resposta simulada (simulado-texto):");
+
+  // J2: falha ao testar atividade sem reserva mostra a mensagem gravada do fornecedor (nunca "Algo deu errado").
+  await selectPrincipal.selectOption({ label: `${nomeFornecedor} — simulado-falha (Simulado)` });
+  await linhaAtividadeTexto.getByRole("button", { name: "Salvar" }).click();
+  await expect(linhaAtividadeTexto.getByText("Pronta", { exact: true })).toBeVisible();
+  await linhaAtividadeTexto.getByRole("button", { name: "Testar atividade" }).click();
+  await expect(resultadoAtiv.getByRole("alert")).toContainText("O fornecedor simulado falhou para este modelo de teste.");
+
+  // J4: tentativa de excluir fornecedor em uso mostra erro 409 no diálogo sem excluir.
+  await menuAdmin.getByRole("link", { name: "Fornecedores" }).click();
+  await expect(page).toHaveURL(/\/admin\/fornecedores$/);
+  await linhaFornecedor.getByRole("link", { name: "Modelos" }).click();
+  await expect(page).toHaveURL(/\/admin\/fornecedores\/[^/]+$/);
+  await page.getByRole("button", { name: "Excluir" }).click();
+  const dialogExcluirEmUso = page.getByRole("dialog", { name: "Excluir fornecedor" });
+  await expect(dialogExcluirEmUso).toBeVisible();
+  await dialogExcluirEmUso.getByRole("button", { name: "Confirmar exclusão" }).click();
+  await expect(dialogExcluirEmUso.getByRole("alert")).toContainText("Este fornecedor está em uso nas atividades: Texto.");
+  await dialogExcluirEmUso.getByRole("button", { name: "Cancelar" }).click();
+  await expect(dialogExcluirEmUso).toBeHidden();
+
+  // J4: exclusão de fornecedor (cria um segundo simulado sem uso, testa falha no modelo para validar J2 na tela do fornecedor, exclui e confirma histórico preservado).
+  const nomeDescartavel = `Simulado Excluir ${Date.now()}`;
+  await menuAdmin.getByRole("link", { name: "Fornecedores" }).click();
+  await expect(page).toHaveURL(/\/admin\/fornecedores$/);
+
+  await page.getByRole("button", { name: "Novo fornecedor" }).click();
+  await expect(dialogNovo).toBeVisible();
+  await dialogNovo.getByLabel("Tipo").selectOption("simulado");
+  await dialogNovo.getByLabel("Nome").fill(nomeDescartavel);
+  await dialogNovo.getByRole("button", { name: "Salvar fornecedor" }).click();
+  await expect(dialogNovo).toBeHidden();
+
+  const linhaDescartavel = page.getByTestId("lista-fornecedores").locator("tr", { hasText: nomeDescartavel });
+  await expect(linhaDescartavel).toBeVisible();
+  await linhaDescartavel.getByRole("link", { name: "Modelos" }).click();
+  await expect(page).toHaveURL(/\/admin\/fornecedores\/[^/]+$/);
+
+  await secaoManual.getByLabel("Identificador do modelo").fill("simulado-falha");
+  await secaoManual.getByLabel("Serviço").selectOption("texto");
+  await secaoManual.getByRole("button", { name: "Incluir modelo" }).click();
+  const linhaFalhaDesc = secaoCadastrados.locator("tr", { hasText: "simulado-falha" });
+  await expect(linhaFalhaDesc).toBeVisible();
+  await adicionarPreco(page, linhaFalhaDesc, "token_entrada", "1");
+  await adicionarPreco(page, linhaFalhaDesc, "token_saida", "2");
+
+  // J2: falha ao testar modelo mostra a mensagem real na tela do fornecedor.
+  await linhaFalhaDesc.getByRole("button", { name: "Testar" }).click();
+  await expect(resultadoTeste.getByRole("alert")).toContainText("O fornecedor simulado falhou para este modelo de teste.");
+
+  // J4: botão Excluir abre diálogo citando o nome do fornecedor e, após confirmar, remove da lista.
+  await page.getByRole("button", { name: "Excluir" }).click();
+  const dialogExcluir = page.getByRole("dialog", { name: "Excluir fornecedor" });
+  await expect(dialogExcluir).toBeVisible();
+  await expect(dialogExcluir).toContainText(nomeDescartavel);
+  await dialogExcluir.getByRole("button", { name: "Confirmar exclusão" }).click();
+
+  await expect(page).toHaveURL(/\/admin\/fornecedores$/);
+  await expect(page.getByTestId("lista-fornecedores").locator("tr", { hasText: nomeDescartavel })).toHaveCount(0);
+
+  // Confirma que Registros continua exibindo o nome do fornecedor excluído.
+  await menuAdmin.getByRole("link", { name: "Registros" }).click();
+  await expect(page).toHaveURL(/\/admin\/registros$/);
+  await expect(page.locator("tbody tr", { hasText: nomeDescartavel }).first()).toBeVisible();
 });
 
 test("AC37 e AC30: usuário comum não vê o menu Administração, /admin redireciona para /inicio e Operação não mostra fornecedores", async ({ page }) => {

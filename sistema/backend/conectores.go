@@ -185,8 +185,8 @@ func (c *conectorOpenAI) gerarImagem(ctx context.Context, modelo, prompt string)
 		"prompt": prompt,
 		"n":      1,
 	}
-	// Modelos gpt-image-* já devolvem b64_json por padrão e recusam o parâmetro response_format.
-	if !strings.HasPrefix(strings.ToLower(modelo), "gpt-image-") {
+	// Apenas modelos dall-e-* aceitam response_format; os demais (gpt-image-*, chatgpt-image-*) devolvem b64_json por padrão e recusam o parâmetro.
+	if strings.HasPrefix(strings.ToLower(modelo), "dall-e-") {
 		corpo["response_format"] = "b64_json"
 	}
 	var resp struct {

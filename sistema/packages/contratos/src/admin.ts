@@ -113,7 +113,7 @@ export const PedidoNovoFornecedor = z.object({
 export type PedidoNovoFornecedor = z.infer<typeof PedidoNovoFornecedor>;
 
 // PATCH /api/admin/fornecedores/{id} -> 200 Fornecedor. Campos ausentes não mudam.
-// chave: troca a chave (mínimo de 12 caracteres ASCII visíveis, máx. 500). ativo=false desativa (nada é apagado). O tipo não muda.
+// chave: troca a chave (mínimo de 12 caracteres ASCII visíveis, máx. 500). ativo=false desativa. O tipo não muda.
 // Erros: 400 dados_invalidos | formato_invalido | endereco_invalido; 404 nao_encontrado; 409 nome_repetido.
 export const PedidoEditarFornecedor = z.object({
   nome: z.string().trim().min(1).max(100).optional(),
@@ -126,8 +126,11 @@ export const PedidoEditarFornecedor = z.object({
 });
 export type PedidoEditarFornecedor = z.infer<typeof PedidoEditarFornecedor>;
 
+// DELETE /api/admin/fornecedores/{id} -> 204 (exclui fornecedor, modelos e preços; preserva ia_execucoes).
+// Erros: 404 nao_encontrado; 409 fornecedor_em_uso (atividade usa modelo deste fornecedor).
+
 // POST /api/admin/fornecedores/{id}/ler-modelos (sem corpo) -> 200
-// Erros com mensagem clara e sem a chave: 502 fornecedor_recusou_chave | fornecedor_indisponivel |
+// Erros com mensagem clara e sem a chave: 422 fornecedor_recusou_chave | fornecedor_indisponivel |
 // fornecedor_erro; 400 endereco_invalido; 409 fornecedor_inativo.
 export const RespostaLerModelos = z.object({
   modelos: z.array(z.object({ identificador: z.string(), jaCadastrado: z.boolean() })),
@@ -217,7 +220,7 @@ export type ModeloResumo = z.infer<typeof ModeloResumo>;
 
 // POST /api/admin/modelos/{id}/testar (sem corpo) -> 200
 // Texto envia "Oi, qual modelo é você?"; imagem pede "um círculo azul sobre fundo branco".
-// Erros: 409 sem_preco | limite_atingido | modelo_inativo; 502 fornecedor_* (mensagem clara, sem a chave).
+// Erros: 409 sem_preco | limite_atingido | modelo_inativo; 422 fornecedor_* (mensagem clara, sem a chave).
 export const ResultadoTeste = z.object({
   execucaoId: z.string(),
   servico: Servico,
@@ -265,7 +268,7 @@ export const RotaAtividade = z.object({
   principal: ModeloResumo.nullable(),
   reserva: ModeloResumo.nullable(),
   pronta: z.boolean(),
-  falta: z.array(z.string()), // ex.: ["modelo principal", "modelo reserva", "preço do modelo reserva"]
+  falta: z.array(z.string()), // ex.: ["modelo principal"] (reserva é opcional)
 });
 export type RotaAtividade = z.infer<typeof RotaAtividade>;
 
@@ -284,7 +287,7 @@ export type PedidoRotaAtividade = z.infer<typeof PedidoRotaAtividade>;
 // Roda a atividade como uma atividade de verdade: principal, e reserva se o principal falhar ou estiver no limite.
 // Erros: 409 atividade_incompleta (mensagem diz o que falta, AC36);
 //        409 limite_atingido (principal e reserva no limite, AC34);
-//        502 atividade_falhou (principal e reserva falharam; registros gravados).
+//        422 atividade_falhou (principal e reserva falharam; registros gravados).
 export const Tentativa = z.object({
   modelo: ModeloResumo,
   status: z.enum(["ok", "falha", "pulado_limite"]),

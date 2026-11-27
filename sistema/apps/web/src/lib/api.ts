@@ -268,6 +268,20 @@ export function useEditarFornecedor() {
   });
 }
 
+export function useExcluirFornecedor() {
+  const qc = useQueryClient();
+  return useMutation({
+    gcTime: 0,
+    mutationFn: (id: string) =>
+      chamar("DELETE", `/api/admin/fornecedores/${encodeURIComponent(id)}`, null),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "fornecedores"] });
+      qc.invalidateQueries({ queryKey: ["admin", "avisos"] });
+      qc.invalidateQueries({ queryKey: ["admin", "atividades"] });
+    },
+  });
+}
+
 export function useLerModelos(fornecedorId: string) {
   return useMutation({
     mutationFn: () =>

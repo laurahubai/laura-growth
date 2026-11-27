@@ -1,9 +1,9 @@
 "use client";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { ArrowLeft, DollarSign, Loader2, Play, Plus, RefreshCw, X } from "lucide-react";
+import { ArrowLeft, DollarSign, Loader2, Play, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import {
   nomeTipoFornecedor,
   nomeUnidadePreco,
@@ -20,6 +20,7 @@ import {
   useCriarModelo,
   useCriarPreco,
   useEditarModelo,
+  useExcluirFornecedor,
   useFornecedoresAdmin,
   useLerModelos,
   useModelosFornecedor,
@@ -44,6 +45,7 @@ function sugerirServico(identificador: string): Servico {
 
 export default function PaginaModelosFornecedor() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const fornecedorId = typeof params?.id === "string" ? params.id : "";
 
   const fornecedores = useFornecedoresAdmin();
@@ -51,6 +53,7 @@ export default function PaginaModelosFornecedor() {
   const lerModelos = useLerModelos(fornecedorId);
   const criarModelo = useCriarModelo(fornecedorId);
   const editarModelo = useEditarModelo(fornecedorId);
+  const excluirFornecedor = useExcluirFornecedor();
   const testar = useTestarModelo(fornecedorId);
 
   const [servicosLidos, setServicosLidos] = useState<Record<string, Servico>>({});
@@ -60,9 +63,16 @@ export default function PaginaModelosFornecedor() {
   const [testandoId, setTestandoId] = useState<string>("");
   const [modeloPrecos, setModeloPrecos] = useState<Modelo | null>(null);
   const [modeloEditar, setModeloEditar] = useState<Modelo | null>(null);
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
 
   const bloqueado = useRedirecionarSemPermissao(
-    fornecedores.error || modelos.error || lerModelos.error || criarModelo.error || editarModelo.error || testar.error,
+    fornecedores.error ||
+      modelos.error ||
+      lerModelos.error ||
+      criarModelo.error ||
+      editarModelo.error ||
+      excluirFornecedor.error ||
+      testar.error,
   );
   if (bloqueado) return <div className="vazio" role="alert">{bloqueado}</div>;
 
@@ -133,22 +143,37 @@ export default function PaginaModelosFornecedor() {
             )}
           </div>
 
-          <button
-            type="button"
-            className="btn primario"
-            disabled={lerModelos.isPending || !fornecedorId}
-            onClick={() => {
-              setErroIncluirLido("");
-              lerModelos.mutate();
-            }}
-          >
-            {lerModelos.isPending ? (
-              <Loader2 size={16} className="girar" aria-hidden />
-            ) : (
-              <RefreshCw size={16} aria-hidden />
+          <div className="row">
+            <button
+              type="button"
+              className="btn primario"
+              disabled={lerModelos.isPending || !fornecedorId}
+              onClick={() => {
+                setErroIncluirLido("");
+                lerModelos.mutate();
+              }}
+            >
+              {lerModelos.isPending ? (
+                <Loader2 size={16} className="girar" aria-hidden />
+              ) : (
+                <RefreshCw size={16} aria-hidden />
+              )}
+              {lerModelos.isPending ? "Lendo modelos…" : "Ler modelos disponíveis"}
+            </button>
+            {fornecedor && (
+              <button
+                type="button"
+                className="btn perigo"
+                disabled={excluirFornecedor.isPending}
+                onClick={() => {
+                  excluirFornecedor.reset();
+                  setConfirmandoExclusao(true);
+                }}
+              >
+                <Trash2 size={16} aria-hidden /> Excluir
+              </button>
             )}
-            {lerModelos.isPending ? "Lendo modelos…" : "Ler modelos disponíveis"}
-          </button>
+          </div>
         </div>
 
         {fornecedores.isSuccess && !fornecedor && (
@@ -458,7 +483,112 @@ export default function PaginaModelosFornecedor() {
           aoFechar={() => setModeloEditar(null)}
         />
       )}
+
+      {confirmandoExclusao && fornecedor && (
+        <DialogoExcluirFornecedor
+          fornecedorNome={fornecedor.nome}
+          enviando={excluirFornecedor.isPending}
+          erro={
+            excluirFornecedor.error instanceof FalhaApi
+              ? excluirFornecedor.error.message
+              : excluirFornecedor.error
+                ? "Não foi possível excluir o fornecedor."
+                : ""
+          }
+          aoCancelar={() => {
+            if (!excluirFornecedor.isPending) {
+              excluirFornecedor.reset();
+              setConfirmandoExclusao(false);
+            }
+          }}
+          aoConfirmar={() => {
+            excluirFornecedor.mutate(fornecedor.id, {
+              onSuccess: () => {
+                setConfirmandoExclusao(false);
+                router.push("/admin/fornecedores");
+              },
+            });
+          }}
+        />
+      )}
     </>
+  );
+}
+
+function DialogoExcluirFornecedor({
+  fornecedorNome,
+  enviando,
+  erro,
+  aoCancelar,
+  aoConfirmar,
+}: {
+  fornecedorNome: string;
+  enviando: boolean;
+  erro: string;
+  aoCancelar: () => void;
+  aoConfirmar: () => void;
+}) {
+  useEffect(() => {
+    const aoTeclar = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !enviando) aoCancelar();
+    };
+    window.addEventListener("keydown", aoTeclar);
+    return () => window.removeEventListener("keydown", aoTeclar);
+  }, [aoCancelar, enviando]);
+
+  return (
+    <div
+      className="drawer-fundo"
+      style={{ justifyContent: "center", alignItems: "center", padding: 16 }}
+      onClick={aoCancelar}
+    >
+      <div
+        className="card stack"
+        style={{ width: "min(460px, 100%)", boxShadow: "var(--shadow-overlay)" }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="titulo-excluir-fornecedor"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <h2 id="titulo-excluir-fornecedor" style={{ margin: 0 }}>
+            Excluir fornecedor
+          </h2>
+          <button
+            type="button"
+            className="btn peq"
+            aria-label="Fechar"
+            disabled={enviando}
+            onClick={aoCancelar}
+          >
+            <X size={16} aria-hidden />
+          </button>
+        </div>
+
+        <p style={{ margin: 0 }}>
+          Tem certeza de que deseja excluir o fornecedor <b>{fornecedorNome}</b>?
+        </p>
+        <p className="small muted" style={{ margin: 0 }}>
+          Os modelos, preços e a chave cadastrada deste fornecedor serão removidos. O histórico de execuções e
+          custos será mantido.
+        </p>
+
+        {erro && (
+          <div className="alerta t-danger" role="alert">
+            {erro}
+          </div>
+        )}
+
+        <div className="row" style={{ justifyContent: "flex-end", marginTop: 8 }}>
+          <button type="button" className="btn" disabled={enviando} onClick={aoCancelar}>
+            Cancelar
+          </button>
+          <button type="button" className="btn perigo" disabled={enviando} onClick={aoConfirmar}>
+            {enviando ? "Excluindo…" : "Confirmar exclusão"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

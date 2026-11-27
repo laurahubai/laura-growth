@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const (
@@ -256,6 +257,11 @@ func (a *API) salvarRotaAtividade(w http.ResponseWriter, r *http.Request, _ cont
 			modelo_reserva_id = EXCLUDED.modelo_reserva_id,
 			atualizado_em = now()`,
 		def.Codigo, p.ModeloPrincipalID, p.ModeloReservaID); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			erro(w, 404, "nao_encontrado", "Modelo não encontrado.")
+			return
+		}
 		falhaInterna(w, err)
 		return
 	}
@@ -314,7 +320,7 @@ func (a *API) testarModelo(w http.ResponseWriter, r *http.Request, s contextoSes
 	if err != nil {
 		var ef *erroFornecedor
 		if errors.As(err, &ef) {
-			erro(w, 502, ef.codigo, ef.mensagem)
+			erro(w, 422, ef.codigo, ef.mensagem)
 			return
 		}
 		var ee *erroEnderecoExecucao
@@ -533,13 +539,16 @@ func (a *API) executarAtividadeInterna(ctx context.Context, atividade, orgID, us
 	tentativas := make([]Tentativa, 0, 2)
 	todosPuladoLimite := true
 
-	pares := []struct {
+	type parExecucao struct {
 		id      string
 		reserva bool
 		numero  int
-	}{
+	}
+	pares := []parExecucao{
 		{id: rota.Principal.ID, reserva: false, numero: 1},
-		{id: rota.Reserva.ID, reserva: true, numero: 2},
+	}
+	if rota.Reserva != nil {
+		pares = append(pares, parExecucao{id: rota.Reserva.ID, reserva: true, numero: 2})
 	}
 
 	for _, par := range pares {
@@ -627,9 +636,34 @@ func (a *API) executarAtividadeInterna(ctx context.Context, atividade, orgID, us
 	}
 
 	if todosPuladoLimite {
-		return ResultadoAtividade{}, 409, "limite_atingido", "Limite mensal atingido no modelo principal e no modelo reserva."
+		msgLimite := "Limite mensal atingido no modelo principal."
+		if rota.Reserva != nil {
+			msgLimite = "Limite mensal atingido no modelo principal e no modelo reserva."
+		}
+		return ResultadoAtividade{}, 409, "limite_atingido", msgLimite
 	}
-	return ResultadoAtividade{}, 502, "atividade_falhou", "Não foi possível concluir a atividade pelos modelos configurados."
+	return ResultadoAtividade{}, 422, "atividade_falhou", resumirErroTentativas(tentativas)
+}
+
+func resumirErroTentativas(tentativas []Tentativa) string {
+	if len(tentativas) == 1 && tentativas[0].Erro != nil {
+		return *tentativas[0].Erro
+	}
+	partes := make([]string, 0, len(tentativas))
+	for i, t := range tentativas {
+		if t.Erro == nil {
+			continue
+		}
+		papel := "Principal"
+		if i > 0 {
+			papel = "Reserva"
+		}
+		partes = append(partes, fmt.Sprintf("%s (%s): %s", papel, t.Modelo.Identificador, *t.Erro))
+	}
+	if len(partes) == 0 {
+		return "Não foi possível concluir a atividade pelos modelos configurados."
+	}
+	return strings.Join(partes, " ")
 }
 
 type executorSQL interface {
@@ -947,7 +981,9 @@ func (a *API) carregarRotaAtividade(ctx context.Context, def definicaoAtividade)
 
 func (a *API) avaliarModeloRota(ctx context.Context, id *string, papel, servico, hoje string, falta *[]string) (*ModeloResumo, error) {
 	if id == nil {
-		*falta = append(*falta, "modelo "+papel)
+		if papel == "principal" {
+			*falta = append(*falta, "modelo "+papel)
+		}
 		return nil, nil
 	}
 	cand, err := a.buscarCandidato(ctx, *id)
