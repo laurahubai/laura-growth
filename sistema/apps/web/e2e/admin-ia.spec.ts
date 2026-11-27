@@ -25,8 +25,9 @@ async function entrar(page: Page, email: string, senha: string) {
 async function adicionarPreco(
   page: Page,
   linhaModelo: Locator,
-  unidade: "token_entrada" | "token_saida" | "imagem",
+  unidade: "token_entrada" | "token_entrada_imagem" | "token_saida" | "imagem",
   valorUsd: string,
+  servico: "texto" | "imagem" = "texto",
 ) {
   await linhaModelo.getByRole("button", { name: "Preços" }).click();
   const dialog = page.getByRole("dialog", { name: "Preços do modelo" });
@@ -35,11 +36,19 @@ async function adicionarPreco(
   await dialog.getByLabel("Valor (US$)").fill(valorUsd);
   await dialog.getByRole("button", { name: "Adicionar preço" }).click();
   const rotuloUnidade =
-    unidade === "token_entrada"
-      ? "Entrada (US$ por 1 milhão de tokens)"
-      : unidade === "token_saida"
-        ? "Saída (US$ por 1 milhão de tokens)"
-        : "Imagem (US$ por imagem)";
+    servico === "imagem"
+      ? unidade === "token_entrada"
+        ? "Entrada de texto (US$ por 1 milhão de tokens)"
+        : unidade === "token_entrada_imagem"
+          ? "Entrada de imagem (US$ por 1 milhão de tokens)"
+          : unidade === "token_saida"
+            ? "Saída de imagem (US$ por 1 milhão de tokens)"
+            : "Por imagem (só para modelos sem tokens)"
+      : unidade === "token_entrada"
+        ? "Entrada (US$ por 1 milhão de tokens)"
+        : unidade === "token_saida"
+          ? "Saída (US$ por 1 milhão de tokens)"
+          : "Imagem (US$ por imagem)";
   await expect(dialog.locator("tbody tr", { hasText: rotuloUnidade }).first()).toBeVisible();
   await dialog.getByRole("button", { name: "Fechar" }).click();
   await expect(dialog).toBeHidden();
@@ -161,7 +170,7 @@ test("caminho principal da Administração de IA: fornecedor simulado, modelos, 
   await adicionarPreco(page, linhaTexto, "token_saida", "2.5");
   await adicionarPreco(page, linhaFalha, "token_entrada", "1");
   await adicionarPreco(page, linhaFalha, "token_saida", "2");
-  await adicionarPreco(page, linhaImagem, "imagem", "0.04");
+  await adicionarPreco(page, linhaImagem, "imagem", "0.04", "imagem");
 
   // Executa "Testar" em simulado-texto e valida resultado, tokens, US$ e selo Simulado.
   await linhaTexto.getByRole("button", { name: "Testar" }).click();
@@ -173,12 +182,13 @@ test("caminho principal da Administração de IA: fornecedor simulado, modelos, 
   await expect(resultadoTeste.locator("dd").nth(1)).toHaveText("18");
   await expect(resultadoTeste.locator("dd").nth(3)).toHaveText("US$ 0,000063");
 
-  // Executa "Testar" em simulado-imagem e valida imagem, quantidade, US$ e selo Simulado.
+  // Executa "Testar" em simulado-imagem (preço por imagem) e valida imagem, quantidade, US$ e base "por imagem (preço antigo)".
   await linhaImagem.getByRole("button", { name: "Testar" }).click();
   await expect(resultadoTeste.getByAltText("Imagem gerada no teste")).toBeVisible();
   await expect(resultadoTeste.getByText("Simulado", { exact: true })).toBeVisible();
   await expect(resultadoTeste.locator("dd").nth(2)).toHaveText("1");
   await expect(resultadoTeste.locator("dd").nth(3)).toContainText("US$ 0,04");
+  await expect(resultadoTeste).toContainText("por imagem (preço antigo)");
 
   // Configura atividade "texto" com principal simulado-falha e reserva simulado-texto.
   const menuAdmin = page.getByRole("navigation", { name: "Menu da Administração" });
@@ -338,4 +348,85 @@ test("AC37 e AC30: usuário comum não vê o menu Administração, /admin redire
   await page.goto("/admin/fornecedores");
   await expect(page).toHaveURL(/\/inicio$/);
   await expect(menuPrincipal.getByRole("link", { name: "Administração" })).toHaveCount(0);
+});
+
+test("P4 e P5: modelo de imagem com os três preços por tokens calcula custo exato e exibe base 'por tokens'", async ({
+  page,
+}) => {
+  const nomeFornecedor = `Simulado Img Tokens ${Date.now()}`;
+
+  await entrar(page, adminEmail, adminSenha);
+  await page.getByRole("navigation", { name: "Menu principal" }).getByRole("link", { name: "Administração" }).click();
+  await expect(page).toHaveURL(/\/admin\/fornecedores$/);
+
+  await page.getByRole("button", { name: "Novo fornecedor" }).click();
+  const dialogNovo = page.getByRole("dialog", { name: "Novo fornecedor" });
+  await dialogNovo.getByLabel("Tipo").selectOption("simulado");
+  await dialogNovo.getByLabel("Nome").fill(nomeFornecedor);
+  await dialogNovo.getByRole("button", { name: "Salvar fornecedor" }).click();
+  await expect(dialogNovo).toBeHidden();
+
+  const linhaFornecedor = page.getByTestId("lista-fornecedores").locator("tr", { hasText: nomeFornecedor });
+  await linhaFornecedor.getByRole("link", { name: "Modelos" }).click();
+  await expect(page).toHaveURL(/\/admin\/fornecedores\/[^/]+$/);
+
+  const secaoManual = page.locator("section", { hasText: "Incluir modelo à mão" });
+  await secaoManual.getByLabel("Identificador do modelo").fill("simulado-imagem-tokens");
+  await secaoManual.getByLabel("Serviço").selectOption("imagem");
+  await secaoManual.getByRole("button", { name: "Incluir modelo" }).click();
+
+  const secaoCadastrados = page.locator("section", { hasText: "Modelos cadastrados" });
+  const linhaModelo = secaoCadastrados.locator("tr", { hasText: "simulado-imagem-tokens" });
+  await expect(linhaModelo).toBeVisible();
+
+  // Confirma que o diálogo de preços exibe as três opções por tokens (1M) e a alternativa por imagem.
+  await linhaModelo.getByRole("button", { name: "Preços" }).click();
+  const dialogPrecos = page.getByRole("dialog", { name: "Preços do modelo" });
+  await expect(dialogPrecos).toBeVisible();
+  const opcoesTexto = await dialogPrecos.getByLabel("Unidade").locator("option").allTextContents();
+  expect(opcoesTexto).toEqual([
+    "Entrada de texto (US$ por 1 milhão de tokens)",
+    "Entrada de imagem (US$ por 1 milhão de tokens)",
+    "Saída de imagem (US$ por 1 milhão de tokens)",
+    "Por imagem (só para modelos sem tokens)",
+  ]);
+  await dialogPrecos.getByRole("button", { name: "Fechar" }).click();
+  await expect(dialogPrecos).toBeHidden();
+
+  // Cadastra os três preços por tokens: 5 / 10 / 5 (para 12 entrada texto, 0 entrada imagem, 1258 saída -> 0.006350 USD).
+  await adicionarPreco(page, linhaModelo, "token_entrada", "5", "imagem");
+  await adicionarPreco(page, linhaModelo, "token_entrada_imagem", "10", "imagem");
+  await adicionarPreco(page, linhaModelo, "token_saida", "5", "imagem");
+
+  // Lista de modelos mostra os três preços vigentes.
+  await expect(linhaModelo).toContainText("Entrada de texto:");
+  await expect(linhaModelo).toContainText("Entrada de imagem:");
+  await expect(linhaModelo).toContainText("Saída de imagem:");
+
+  // Roda Testar e verifica tokens discriminados, custo exato (US$ 0,006350) e base "por tokens".
+  await linhaModelo.getByRole("button", { name: "Testar" }).click();
+  const resultadoTeste = page.getByTestId("resultado-teste");
+  await expect(resultadoTeste).toBeVisible();
+  await expect(resultadoTeste.getByAltText("Imagem gerada no teste")).toBeVisible();
+  await expect(resultadoTeste.locator("dd").nth(0)).toHaveText("12");
+  await expect(resultadoTeste.locator("dd").nth(1)).toHaveText("1258");
+  await expect(resultadoTeste.locator("dd").nth(2)).toHaveText("1");
+  await expect(resultadoTeste.locator("dd").nth(3)).toHaveText("US$ 0,006350");
+  await expect(resultadoTeste.locator("dd").nth(4)).toHaveText("0");
+  await expect(resultadoTeste.locator("dd").nth(5)).toHaveText("por tokens");
+
+  // Confirma também na tela Registros os tokens discriminados e a base "por tokens".
+  await page.getByRole("navigation", { name: "Menu da Administração" }).getByRole("link", { name: "Registros" }).click();
+  await expect(page).toHaveURL(/\/admin\/registros$/);
+  const linhaReg = page
+    .locator("tbody tr")
+    .filter({ hasText: nomeFornecedor })
+    .filter({ hasText: "simulado-imagem-tokens" })
+    .first();
+  await expect(linhaReg).toBeVisible();
+  await expect(linhaReg.locator("td").nth(9)).toContainText("Texto: 12");
+  await expect(linhaReg.locator("td").nth(9)).toContainText("Img: 0");
+  await expect(linhaReg.locator("td").nth(9)).toContainText("Saída: 1258");
+  await expect(linhaReg.locator("td").nth(11)).toHaveText("US$ 0,006350");
+  await expect(linhaReg.locator("td").nth(12)).toHaveText("por tokens");
 });
