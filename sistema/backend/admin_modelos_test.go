@@ -235,7 +235,8 @@ func TestConectoresGeracaoTextoEImagem(t *testing.T) {
 		t.Fatalf("simulado texto inesperado: %+v err=%v", rtSim, err)
 	}
 	riSim, err := sim.gerarImagem(ctx, "simulado-imagem", "círculo azul")
-	if err != nil || !strings.HasPrefix(riSim.ImagemDataUrl, "data:image/png;base64,") || riSim.Imagens != 1 {
+	if err != nil || !strings.HasPrefix(riSim.ImagemDataUrl, "data:image/png;base64,") || riSim.Imagens != 1 ||
+		riSim.TokensEntrada != 12 || riSim.TokensEntradaImagem != 0 || riSim.TokensSaida != 1258 {
 		t.Fatalf("simulado imagem inesperado: %+v err=%v", riSim, err)
 	}
 	if _, err := sim.gerarTexto(ctx, "simulado-falha", "Oi"); err == nil {
@@ -648,22 +649,48 @@ func TestModelosEPrecosRegrasEVigencia(t *testing.T) {
 		t.Fatalf("preços vigentes de texto inesperados: %+v", gotTxt.PrecosVigentes)
 	}
 
-	// Preço: recusa unidade que não combina com o serviço do modelo (400 formato_invalido);
-	// modelo de imagem aceita token_entrada além de imagem.
+	// P1: modelo de texto recusa imagem e token_entrada_imagem (400 formato_invalido);
+	// modelo de imagem aceita token_entrada, token_entrada_imagem, token_saida e imagem.
 	if st, body := c.pedirComCorpo("POST", "/api/admin/modelos/"+modTexto.ID+"/precos", map[string]any{
 		"unidade": "imagem", "precoUsd": 0.1, "vigenciaInicio": "2026-11-25",
 	}); st != 400 || !strings.Contains(string(body), "formato_invalido") {
 		t.Fatalf("unidade imagem em modelo texto esperava 400 formato_invalido, veio %d (%s)", st, body)
 	}
-	if st, body := c.pedirComCorpo("POST", "/api/admin/modelos/"+modImg.ID+"/precos", map[string]any{
-		"unidade": "token_saida", "precoUsd": 0.1, "vigenciaInicio": "2026-11-25",
+	if st, body := c.pedirComCorpo("POST", "/api/admin/modelos/"+modTexto.ID+"/precos", map[string]any{
+		"unidade": "token_entrada_imagem", "precoUsd": 0.1, "vigenciaInicio": "2026-11-25",
 	}); st != 400 || !strings.Contains(string(body), "formato_invalido") {
-		t.Fatalf("unidade token_saida em modelo imagem esperava 400 formato_invalido, veio %d (%s)", st, body)
+		t.Fatalf("unidade token_entrada_imagem em modelo texto esperava 400 formato_invalido, veio %d (%s)", st, body)
+	}
+	if st, body := c.pedirComCorpo("POST", "/api/admin/modelos/"+modImg.ID+"/precos", map[string]any{
+		"unidade": "invalida", "precoUsd": 0.1, "vigenciaInicio": "2026-11-25",
+	}); st != 400 || !strings.Contains(string(body), "dados_invalidos") {
+		t.Fatalf("unidade desconhecida esperava 400 dados_invalidos, veio %d (%s)", st, body)
 	}
 	if st := c.pedir("POST", "/api/admin/modelos/"+modImg.ID+"/precos", map[string]any{
 		"unidade": "token_entrada", "precoUsd": 2.0, "vigenciaInicio": "2026-11-25",
 	}, nil); st != 201 {
 		t.Fatalf("modelo imagem deveria aceitar token_entrada, veio %d", st)
+	}
+	if st := c.pedir("POST", "/api/admin/modelos/"+modImg.ID+"/precos", map[string]any{
+		"unidade": "token_entrada_imagem", "precoUsd": 10.0, "vigenciaInicio": "2026-11-25",
+	}, nil); st != 201 {
+		t.Fatalf("modelo imagem deveria aceitar token_entrada_imagem, veio %d", st)
+	}
+	if st := c.pedir("POST", "/api/admin/modelos/"+modImg.ID+"/precos", map[string]any{
+		"unidade": "token_saida", "precoUsd": 40.0, "vigenciaInicio": "2026-11-25",
+	}, nil); st != 201 {
+		t.Fatalf("modelo imagem deveria aceitar token_saida, veio %d", st)
+	}
+
+	if st := c.pedir("GET", "/api/admin/fornecedores/"+fornSim.ID+"/modelos", nil, &listaMod); st != 200 {
+		t.Fatalf("GET modelos após novos preços de imagem falhou: %d", st)
+	}
+	gotImg = listaMod.Modelos[0]
+	if gotImg.PrecosVigentes.TokenEntrada == nil || *gotImg.PrecosVigentes.TokenEntrada != 2.0 ||
+		gotImg.PrecosVigentes.TokenEntradaImagem == nil || *gotImg.PrecosVigentes.TokenEntradaImagem != 10.0 ||
+		gotImg.PrecosVigentes.TokenSaida == nil || *gotImg.PrecosVigentes.TokenSaida != 40.0 ||
+		gotImg.PrecosVigentes.Imagem == nil || *gotImg.PrecosVigentes.Imagem != 0.04 {
+		t.Fatalf("preços vigentes de imagem completos inesperados: %+v", gotImg.PrecosVigentes)
 	}
 
 	// Modelo SEM limite próprio (modImg) usa o gasto do fornecedor inteiro contra o limite do fornecedor (50.00, aviso 80% = 40.00).
@@ -692,5 +719,157 @@ func TestModelosEPrecosRegrasEVigencia(t *testing.T) {
 		"servico": "texto",
 	}); st != 409 || !strings.Contains(string(body), "servico_incompativel") || !strings.Contains(string(body), "Imagem") {
 		t.Fatalf("trocar serviço de modelo em uso esperava 409 servico_incompativel citando Imagem, veio %d (%s)", st, body)
+	}
+}
+
+func TestP2OpenAIImagemUsageComESemDetalhes(t *testing.T) {
+	ctx := context.Background()
+	imgBase64 := base64.StdEncoding.EncodeToString(pngMinimo)
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/images/generations" {
+			w.WriteHeader(404)
+			return
+		}
+		var req map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		prompt, _ := req["prompt"].(string)
+		switch prompt {
+		case "com-detalhes":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]any{
+					"input_tokens":  352,
+					"output_tokens": 1258,
+					"input_tokens_details": map[string]int{
+						"text_tokens":  12,
+						"image_tokens": 340,
+					},
+				},
+			})
+		case "sem-detalhes":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]any{
+					"input_tokens":  25,
+					"output_tokens": 900,
+				},
+			})
+		case "so-image-tokens":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]any{
+					"input_tokens":  100,
+					"output_tokens": 800,
+					"input_tokens_details": map[string]int{
+						"image_tokens": 40,
+					},
+				},
+			})
+		case "inconsistente-soma":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]any{
+					"input_tokens":  100,
+					"output_tokens": 800,
+					"input_tokens_details": map[string]int{
+						"text_tokens":  12,
+						"image_tokens": 40,
+					},
+				},
+			})
+		case "inconsistente-image-maior":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]any{
+					"input_tokens":  30,
+					"output_tokens": 800,
+					"input_tokens_details": map[string]int{
+						"image_tokens": 40,
+					},
+				},
+			})
+		case "inconsistente-text-diferente":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]any{
+					"input_tokens":  30,
+					"output_tokens": 800,
+					"input_tokens_details": map[string]int{
+						"text_tokens": 20,
+					},
+				},
+			})
+		case "detalhes-negativos":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]any{
+					"input_tokens":  10,
+					"output_tokens": 100,
+					"input_tokens_details": map[string]int{
+						"text_tokens":  -1,
+						"image_tokens": 10,
+					},
+				},
+			})
+		case "total-acima-limite":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]any{
+					"input_tokens":  maxTokensFornecedor + 1,
+					"output_tokens": 100,
+					"input_tokens_details": map[string]int{
+						"text_tokens":  10,
+						"image_tokens": 0,
+					},
+				},
+			})
+		default:
+			w.WriteHeader(400)
+		}
+	}))
+	defer srv.Close()
+
+	con, err := novoConector("openai", srv.URL+"/v1", chaveAPITeste, srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	comDet, err := con.gerarImagem(ctx, "chatgpt-image-latest", "com-detalhes")
+	if err != nil {
+		t.Fatalf("usage com detalhes deveria passar: %v", err)
+	}
+	if comDet.TokensEntrada != 12 || comDet.TokensEntradaImagem != 340 || comDet.TokensSaida != 1258 || comDet.Imagens != 1 {
+		t.Fatalf("usage com detalhes inesperado: %+v", comDet)
+	}
+
+	semDet, err := con.gerarImagem(ctx, "gpt-image-1", "sem-detalhes")
+	if err != nil {
+		t.Fatalf("usage sem detalhes deveria passar: %v", err)
+	}
+	if semDet.TokensEntrada != 25 || semDet.TokensEntradaImagem != 0 || semDet.TokensSaida != 900 || semDet.Imagens != 1 {
+		t.Fatalf("usage sem detalhes inesperado: %+v", semDet)
+	}
+
+	soImg, err := con.gerarImagem(ctx, "gpt-image-1", "so-image-tokens")
+	if err != nil {
+		t.Fatalf("usage só com image_tokens deveria derivar text_tokens: %v", err)
+	}
+	if soImg.TokensEntrada != 60 || soImg.TokensEntradaImagem != 40 || soImg.TokensSaida != 800 || soImg.Imagens != 1 {
+		t.Fatalf("usage só com image_tokens inesperado: %+v", soImg)
+	}
+
+	var ef *erroFornecedor
+	for _, caso := range []string{"inconsistente-soma", "inconsistente-image-maior", "inconsistente-text-diferente"} {
+		if _, err := con.gerarImagem(ctx, "gpt-image-1", caso); !errors.As(err, &ef) || ef.codigo != "fornecedor_erro" ||
+			ef.mensagem != "O fornecedor retornou um uso de tokens inconsistente." {
+			t.Fatalf("%s esperava fornecedor_erro inconsistente, veio %v", caso, err)
+		}
+	}
+	if _, err := con.gerarImagem(ctx, "gpt-image-1", "detalhes-negativos"); !errors.As(err, &ef) || ef.codigo != "fornecedor_erro" {
+		t.Fatalf("detalhes negativos esperava fornecedor_erro, veio %v", err)
+	}
+	if _, err := con.gerarImagem(ctx, "gpt-image-1", "total-acima-limite"); !errors.As(err, &ef) || ef.codigo != "fornecedor_erro" {
+		t.Fatalf("total acima do limite esperava fornecedor_erro, veio %v", err)
 	}
 }

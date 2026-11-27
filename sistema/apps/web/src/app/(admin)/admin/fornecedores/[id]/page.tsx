@@ -5,11 +5,12 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { ArrowLeft, DollarSign, Loader2, Play, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import {
+  nomeBaseCalculoPreco,
   nomeTipoFornecedor,
-  nomeUnidadePreco,
   PedidoEditarModelo,
   PedidoNovoModelo,
   PedidoNovoPreco,
+  rotuloUnidadePreco,
   Servico,
   type Modelo,
   type UnidadePreco,
@@ -312,13 +313,17 @@ export default function PaginaModelosFornecedor() {
                 )}
                 <dl className="grid g4" style={{ margin: 0 }}>
                   <div>
-                    <dt className="small muted">Tokens de entrada</dt>
+                    <dt className="small muted">
+                      {testar.data.servico === "imagem" ? "Tokens entrada (texto)" : "Tokens de entrada"}
+                    </dt>
                     <dd style={{ margin: 0 }} className="num">
                       {testar.data.tokensEntrada}
                     </dd>
                   </div>
                   <div>
-                    <dt className="small muted">Tokens de saída</dt>
+                    <dt className="small muted">
+                      {testar.data.servico === "imagem" ? "Tokens saída (imagem)" : "Tokens de saída"}
+                    </dt>
                     <dd style={{ margin: 0 }} className="num">
                       {testar.data.tokensSaida}
                     </dd>
@@ -335,6 +340,20 @@ export default function PaginaModelosFornecedor() {
                       <b>{formatarUsd(testar.data.custoUsd)}</b>
                     </dd>
                   </div>
+                  {testar.data.tokensEntradaImagem !== null && (
+                    <div>
+                      <dt className="small muted">Tokens entrada (imagem)</dt>
+                      <dd style={{ margin: 0 }} className="num">
+                        {testar.data.tokensEntradaImagem}
+                      </dd>
+                    </div>
+                  )}
+                  {testar.data.basePreco !== null && (
+                    <div>
+                      <dt className="small muted">Base de cálculo</dt>
+                      <dd style={{ margin: 0 }}>{nomeBaseCalculoPreco[testar.data.basePreco]}</dd>
+                    </div>
+                  )}
                 </dl>
               </>
             )}
@@ -404,6 +423,34 @@ export default function PaginaModelosFornecedor() {
                                   ? `${formatarPrecoUsd(m.precosVigentes.tokenSaida)} / 1M`
                                   : "Sem preço"}
                               </span>
+                            </div>
+                          ) : m.precosVigentes.tokenEntrada !== null ||
+                            m.precosVigentes.tokenEntradaImagem !== null ||
+                            m.precosVigentes.tokenSaida !== null ? (
+                            <div className="stack" style={{ gap: 2 }}>
+                              <span>
+                                Entrada de texto:{" "}
+                                {m.precosVigentes.tokenEntrada !== null
+                                  ? `${formatarPrecoUsd(m.precosVigentes.tokenEntrada)} / 1M`
+                                  : "Sem preço"}
+                              </span>
+                              <span>
+                                Entrada de imagem:{" "}
+                                {m.precosVigentes.tokenEntradaImagem !== null
+                                  ? `${formatarPrecoUsd(m.precosVigentes.tokenEntradaImagem)} / 1M`
+                                  : "Sem preço"}
+                              </span>
+                              <span>
+                                Saída de imagem:{" "}
+                                {m.precosVigentes.tokenSaida !== null
+                                  ? `${formatarPrecoUsd(m.precosVigentes.tokenSaida)} / 1M`
+                                  : "Sem preço"}
+                              </span>
+                              {m.precosVigentes.imagem !== null && (
+                                <span>
+                                  Por imagem: {formatarPrecoUsd(m.precosVigentes.imagem)} / imagem
+                                </span>
+                              )}
                             </div>
                           ) : m.precosVigentes.imagem !== null ? (
                             `${formatarPrecoUsd(m.precosVigentes.imagem)} / imagem`
@@ -699,7 +746,9 @@ function GavetaPrecosModelo({
   const bloqueado = useRedirecionarSemPermissao(precos.error || criarPreco.error);
 
   const unidadesPermitidas: UnidadePreco[] =
-    modelo.servico === "imagem" ? ["imagem"] : ["token_entrada", "token_saida"];
+    modelo.servico === "imagem"
+      ? ["token_entrada", "token_entrada_imagem", "token_saida", "imagem"]
+      : ["token_entrada", "token_saida"];
 
   const {
     register,
@@ -787,12 +836,18 @@ function GavetaPrecosModelo({
 
         <form className="card stack" style={{ padding: 16 }} onSubmit={enviar} noValidate>
           <h3 style={{ margin: 0 }}>Novo preço</h3>
+          {modelo.servico === "imagem" && (
+            <p className="small muted" style={{ margin: 0 }}>
+              Cadastre os três preços por 1 milhão de tokens para cobrar por tokens. Use “Por imagem (só para modelos
+              sem tokens)” apenas para modelos que não informam tokens.
+            </p>
+          )}
           <label className="campo">
             Unidade
             <select {...register("unidade")}>
               {unidadesPermitidas.map((u) => (
                 <option key={u} value={u}>
-                  {nomeUnidadePreco[u]}
+                  {rotuloUnidadePreco(u, modelo.servico)}
                 </option>
               ))}
             </select>
@@ -868,7 +923,7 @@ function GavetaPrecosModelo({
                 <tbody>
                   {precos.data.precos.map((p) => (
                     <tr key={p.id}>
-                      <td className="small">{nomeUnidadePreco[p.unidade]}</td>
+                      <td className="small">{rotuloUnidadePreco(p.unidade, modelo.servico)}</td>
                       <td className="d">{formatarPrecoUsd(p.precoUsd)}</td>
                       <td className="num small">{formatarDataIso(p.vigenciaInicio)}</td>
                       <td className="num small muted">{formatarDataHora(p.criadoEm)}</td>

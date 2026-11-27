@@ -1,6 +1,11 @@
 "use client";
 import { RefreshCw } from "lucide-react";
-import { nomeAtividade, type Atividade, type Execucao } from "@laura-growth/contratos";
+import {
+  nomeAtividade,
+  nomeBaseCalculoPreco,
+  type Atividade,
+  type Execucao,
+} from "@laura-growth/contratos";
 import { useRedirecionarSemPermissao } from "@/components/ShellAdmin";
 import { useExecucoesAdmin } from "@/lib/api";
 import { formatarDataHora, formatarUsd } from "@/lib/formato";
@@ -63,9 +68,10 @@ export default function PaginaRegistros() {
                   <th>Reserva</th>
                   <th>Status</th>
                   <th>Erro</th>
-                  <th className="d">Tokens (ent./saída)</th>
+                  <th className="d">Tokens</th>
                   <th className="d">Imagens</th>
                   <th className="d">Custo (US$)</th>
+                  <th>Base</th>
                 </tr>
               </thead>
               <tbody>
@@ -86,12 +92,25 @@ export default function PaginaRegistros() {
                     <td>{badgeStatus(e.status)}</td>
                     <td className="small muted">{e.erro ?? "—"}</td>
                     <td className="d small">
-                      {e.tokensEntrada} / {e.tokensSaida}
+                      {e.tokensEntradaImagem !== null ? (
+                        <div className="stack" style={{ gap: 2 }}>
+                          <span>Texto: {e.tokensEntrada}</span>
+                          <span>Img: {e.tokensEntradaImagem}</span>
+                          <span>Saída: {e.tokensSaida}</span>
+                        </div>
+                      ) : (
+                        <>
+                          {e.tokensEntrada} / {e.tokensSaida}
+                        </>
+                      )}
                     </td>
                     <td className="d">{e.imagens}</td>
                     <td className="d">
                       {formatarUsd(e.custoUsd)}
                       {e.custoEstimado && <span className="small muted"> (estimado)</span>}
+                    </td>
+                    <td className="small">
+                      {e.basePreco ? nomeBaseCalculoPreco[e.basePreco] : "—"}
                     </td>
                   </tr>
                 ))}

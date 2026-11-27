@@ -23,8 +23,13 @@ const timeoutFornecedor = 15 * time.Second
 var (
 	servicosValidos = map[string]bool{"texto": true, "imagem": true}
 	origensValidas  = map[string]bool{"lido": true, "manual": true}
-	unidadesValidas = map[string]bool{"token_entrada": true, "token_saida": true, "imagem": true}
-	regexDataISO    = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	unidadesValidas = map[string]bool{
+		"token_entrada":        true,
+		"token_entrada_imagem": true,
+		"token_saida":          true,
+		"imagem":               true,
+	}
+	regexDataISO = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 )
 
 // ---- Formato das respostas (espelha packages/contratos/src/admin.ts) ----
@@ -39,9 +44,10 @@ type RespostaLerModelos struct {
 }
 
 type PrecosVigentes struct {
-	TokenEntrada *float64 `json:"tokenEntrada"`
-	TokenSaida   *float64 `json:"tokenSaida"`
-	Imagem       *float64 `json:"imagem"`
+	TokenEntrada       *float64 `json:"tokenEntrada"`
+	TokenEntradaImagem *float64 `json:"tokenEntradaImagem"`
+	TokenSaida         *float64 `json:"tokenSaida"`
+	Imagem             *float64 `json:"imagem"`
 }
 
 type Modelo struct {
@@ -565,6 +571,8 @@ func (a *API) carregarPrecosVigentes(ctx context.Context, modeloID, dataISO stri
 		switch unidade {
 		case "token_entrada":
 			pv.TokenEntrada = &val
+		case "token_entrada_imagem":
+			pv.TokenEntradaImagem = &val
 		case "token_saida":
 			pv.TokenSaida = &val
 		case "imagem":
@@ -641,13 +649,15 @@ func (a *API) criarPreco(w http.ResponseWriter, r *http.Request, _ contextoSessa
 		erro(w, 400, "dados_invalidos", "Unidade de preço inválida.")
 		return
 	}
-	if servicoModelo == "texto" && p.Unidade == "imagem" {
-		erro(w, 400, "formato_invalido", "Modelo de texto não aceita preço por imagem.")
-		return
-	}
-	if servicoModelo == "imagem" && p.Unidade == "token_saida" {
-		erro(w, 400, "formato_invalido", "Modelo de imagem aceita apenas preço por imagem ou token de entrada.")
-		return
+	if servicoModelo == "texto" {
+		if p.Unidade == "imagem" {
+			erro(w, 400, "formato_invalido", "Modelo de texto não aceita preço por imagem.")
+			return
+		}
+		if p.Unidade == "token_entrada_imagem" {
+			erro(w, 400, "formato_invalido", "Modelo de texto não aceita preço por token de entrada de imagem.")
+			return
+		}
 	}
 	if p.PrecoUsd == nil {
 		erro(w, 400, "dados_invalidos", "Informe o preço em US$.")

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Loader2, Play, Save } from "lucide-react";
 import {
   nomeAtividade,
+  nomeBaseCalculoPreco,
   servicoAtividade,
   type Atividade,
   type Modelo,
@@ -219,13 +220,17 @@ export default function PaginaAtividades() {
 
               <dl className="grid g4" style={{ margin: 0 }}>
                 <div>
-                  <dt className="small muted">Tokens de entrada</dt>
+                  <dt className="small muted">
+                    {testar.data.atividade === "imagem" ? "Tokens entrada (texto)" : "Tokens de entrada"}
+                  </dt>
                   <dd style={{ margin: 0 }} className="num">
                     {testar.data.tokensEntrada}
                   </dd>
                 </div>
                 <div>
-                  <dt className="small muted">Tokens de saída</dt>
+                  <dt className="small muted">
+                    {testar.data.atividade === "imagem" ? "Tokens saída (imagem)" : "Tokens de saída"}
+                  </dt>
                   <dd style={{ margin: 0 }} className="num">
                     {testar.data.tokensSaida}
                   </dd>
@@ -242,6 +247,20 @@ export default function PaginaAtividades() {
                     <b>{formatarUsd(testar.data.custoUsd)}</b>
                   </dd>
                 </div>
+                {testar.data.tokensEntradaImagem !== null && (
+                  <div>
+                    <dt className="small muted">Tokens entrada (imagem)</dt>
+                    <dd style={{ margin: 0 }} className="num">
+                      {testar.data.tokensEntradaImagem}
+                    </dd>
+                  </div>
+                )}
+                {testar.data.basePreco !== null && (
+                  <div>
+                    <dt className="small muted">Base de cálculo</dt>
+                    <dd style={{ margin: 0 }}>{nomeBaseCalculoPreco[testar.data.basePreco]}</dd>
+                  </div>
+                )}
               </dl>
             </>
           )}
