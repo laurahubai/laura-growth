@@ -42,14 +42,39 @@ export type UsoPermitido = z.infer<typeof UsoPermitido>;
 export const SituacaoLimite = z.enum(["normal", "aviso", "limite"]);
 export type SituacaoLimite = z.infer<typeof SituacaoLimite>;
 
-export const UnidadePreco = z.enum(["token_entrada", "token_saida", "imagem"]);
+export const UnidadePreco = z.enum(["token_entrada", "token_entrada_imagem", "token_saida", "imagem"]);
 export type UnidadePreco = z.infer<typeof UnidadePreco>;
 
-// Tokens: US$ por 1 milhão de tokens. Imagem: US$ por imagem.
+// Tokens: US$ por 1 milhão de tokens. Imagem: US$ por imagem (só para modelos sem tokens).
 export const nomeUnidadePreco: Record<UnidadePreco, string> = {
   token_entrada: "Entrada (US$ por 1 milhão de tokens)",
+  token_entrada_imagem: "Entrada de imagem (US$ por 1 milhão de tokens)",
   token_saida: "Saída (US$ por 1 milhão de tokens)",
   imagem: "Imagem (US$ por imagem)",
+};
+
+export function rotuloUnidadePreco(unidade: UnidadePreco, servico: Servico): string {
+  if (servico === "imagem") {
+    switch (unidade) {
+      case "token_entrada":
+        return "Entrada de texto (US$ por 1 milhão de tokens)";
+      case "token_entrada_imagem":
+        return "Entrada de imagem (US$ por 1 milhão de tokens)";
+      case "token_saida":
+        return "Saída de imagem (US$ por 1 milhão de tokens)";
+      case "imagem":
+        return "Por imagem (só para modelos sem tokens)";
+    }
+  }
+  return nomeUnidadePreco[unidade];
+}
+
+export const BaseCalculoPreco = z.enum(["tokens", "imagem"]);
+export type BaseCalculoPreco = z.infer<typeof BaseCalculoPreco>;
+
+export const nomeBaseCalculoPreco: Record<BaseCalculoPreco, string> = {
+  tokens: "por tokens",
+  imagem: "por imagem (preço antigo)",
 };
 
 export const Atividade = z.enum(["chat_cmo", "plano", "pauta", "texto", "imagem", "revisao"]);
@@ -140,6 +165,7 @@ export const RespostaLerModelos = z.object({
 
 export const PrecosVigentes = z.object({
   tokenEntrada: z.number().nullable(),
+  tokenEntradaImagem: z.number().nullable(),
   tokenSaida: z.number().nullable(),
   imagem: z.number().nullable(),
 });
@@ -228,9 +254,11 @@ export const ResultadoTeste = z.object({
   texto: z.string().nullable(),
   imagemDataUrl: z.string().nullable(), // data:image/png;base64,... (não é guardada)
   tokensEntrada: z.number().int(),
+  tokensEntradaImagem: z.number().int().nullable(),
   tokensSaida: z.number().int(),
   imagens: z.number().int(),
   custoUsd: z.number(),
+  basePreco: BaseCalculoPreco.nullable(),
   simulado: z.boolean(),
 });
 export type ResultadoTeste = z.infer<typeof ResultadoTeste>;
@@ -248,10 +276,12 @@ export const Execucao = z.object({
   status: z.enum(["ok", "falha", "pulado_limite"]),
   erro: z.string().nullable(),
   tokensEntrada: z.number().int(),
+  tokensEntradaImagem: z.number().int().nullable(),
   tokensSaida: z.number().int(),
   imagens: z.number().int(),
   custoUsd: z.number(),
   custoEstimado: z.boolean(),
+  basePreco: BaseCalculoPreco.nullable(),
   simulado: z.boolean(),
 });
 export type Execucao = z.infer<typeof Execucao>;
@@ -303,9 +333,11 @@ export const ResultadoAtividade = z.object({
   texto: z.string().nullable(),
   imagemDataUrl: z.string().nullable(),
   tokensEntrada: z.number().int(),
+  tokensEntradaImagem: z.number().int().nullable(),
   tokensSaida: z.number().int(),
   imagens: z.number().int(),
   custoUsd: z.number(),
+  basePreco: BaseCalculoPreco.nullable(),
   simulado: z.boolean(),
 });
 export type ResultadoAtividade = z.infer<typeof ResultadoAtividade>;
