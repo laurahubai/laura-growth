@@ -916,9 +916,28 @@ func (a *API) executarEGerarEm(
 		res.imgs = resp.Imagens
 		res.tokensIn = resp.TokensEntrada
 		tokensInImagemVal = resp.TokensEntradaImagem
-		res.tokensInImagemPtr = &tokensInImagemVal
 		res.tokensOut = resp.TokensSaida
 		res.imagemURL = &resp.ImagemDataUrl
+
+		// Se a base é por tokens mas o fornecedor não informou uso, evita gravar custo zero como ok.
+		if precos.completoPorTokens("imagem") && res.tokensIn+tokensInImagemVal+res.tokensOut == 0 {
+			if precos.imagem != nil {
+				precosAplicados = precosVigentesTexto{imagem: precos.imagem}
+			} else {
+				ef := &erroFornecedor{
+					codigo:   "fornecedor_erro",
+					mensagem: "O fornecedor não informou o uso de tokens.",
+				}
+				if errReg := a.registrarTentativaSemExecucaoEm(ctx, exec, cand, precosAplicados, correlacaoID, atividade, orgID, usuarioID, tentativa, atendidoPelaReserva, "falha", ef.mensagem); errReg != nil {
+					slog.Error("falha ao registrar tentativa sem uso de tokens", "fornecedorId", cand.fornecedorID, "modeloId", cand.modeloID, "erro", errReg)
+					return resultadoExecucao{}, &erroInternoExecucao{err: errReg}
+				}
+				return resultadoExecucao{}, ef
+			}
+		}
+		if precosAplicados.imagem == nil {
+			res.tokensInImagemPtr = &tokensInImagemVal
+		}
 	} else {
 		resp, err := con.gerarTexto(ctx, cand.identificador, prompt)
 		if err != nil {

@@ -224,15 +224,36 @@ func (c *conectorOpenAI) gerarImagem(ctx context.Context, modelo, prompt string)
 	tokensTexto := resp.Usage.InputTokens
 	tokensImagem := 0
 	if d := resp.Usage.InputTokensDetails; d != nil && (d.TextTokens != nil || d.ImageTokens != nil) {
-		tokensTexto = 0
-		if d.TextTokens != nil {
+		inconsistente := &erroFornecedor{
+			codigo:   "fornecedor_erro",
+			mensagem: "O fornecedor retornou um uso de tokens inconsistente.",
+		}
+		if d.TextTokens != nil && d.ImageTokens != nil {
 			tokensTexto = *d.TextTokens
-		}
-		if d.ImageTokens != nil {
 			tokensImagem = *d.ImageTokens
-		}
-		if err := validarTokensFornecedor(tokensTexto, tokensImagem); err != nil {
-			return respostaImagemIA{}, err
+			if err := validarTokensFornecedor(tokensTexto, tokensImagem); err != nil {
+				return respostaImagemIA{}, err
+			}
+			if tokensTexto+tokensImagem != resp.Usage.InputTokens {
+				return respostaImagemIA{}, inconsistente
+			}
+		} else if d.ImageTokens != nil {
+			tokensImagem = *d.ImageTokens
+			if err := validarTokensFornecedor(0, tokensImagem); err != nil {
+				return respostaImagemIA{}, err
+			}
+			if tokensImagem > resp.Usage.InputTokens {
+				return respostaImagemIA{}, inconsistente
+			}
+			tokensTexto = resp.Usage.InputTokens - tokensImagem
+		} else {
+			tokensTexto = *d.TextTokens
+			if err := validarTokensFornecedor(tokensTexto, 0); err != nil {
+				return respostaImagemIA{}, err
+			}
+			if tokensTexto != resp.Usage.InputTokens {
+				return respostaImagemIA{}, inconsistente
+			}
 		}
 	}
 	return respostaImagemIA{

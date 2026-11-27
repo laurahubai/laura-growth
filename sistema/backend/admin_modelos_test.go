@@ -755,6 +755,51 @@ func TestP2OpenAIImagemUsageComESemDetalhes(t *testing.T) {
 					"output_tokens": 900,
 				},
 			})
+		case "so-image-tokens":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]any{
+					"input_tokens":  100,
+					"output_tokens": 800,
+					"input_tokens_details": map[string]int{
+						"image_tokens": 40,
+					},
+				},
+			})
+		case "inconsistente-soma":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]any{
+					"input_tokens":  100,
+					"output_tokens": 800,
+					"input_tokens_details": map[string]int{
+						"text_tokens":  12,
+						"image_tokens": 40,
+					},
+				},
+			})
+		case "inconsistente-image-maior":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]any{
+					"input_tokens":  30,
+					"output_tokens": 800,
+					"input_tokens_details": map[string]int{
+						"image_tokens": 40,
+					},
+				},
+			})
+		case "inconsistente-text-diferente":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]string{{"b64_json": imgBase64}},
+				"usage": map[string]any{
+					"input_tokens":  30,
+					"output_tokens": 800,
+					"input_tokens_details": map[string]int{
+						"text_tokens": 20,
+					},
+				},
+			})
 		case "detalhes-negativos":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"data": []map[string]string{{"b64_json": imgBase64}},
@@ -806,7 +851,21 @@ func TestP2OpenAIImagemUsageComESemDetalhes(t *testing.T) {
 		t.Fatalf("usage sem detalhes inesperado: %+v", semDet)
 	}
 
+	soImg, err := con.gerarImagem(ctx, "gpt-image-1", "so-image-tokens")
+	if err != nil {
+		t.Fatalf("usage só com image_tokens deveria derivar text_tokens: %v", err)
+	}
+	if soImg.TokensEntrada != 60 || soImg.TokensEntradaImagem != 40 || soImg.TokensSaida != 800 || soImg.Imagens != 1 {
+		t.Fatalf("usage só com image_tokens inesperado: %+v", soImg)
+	}
+
 	var ef *erroFornecedor
+	for _, caso := range []string{"inconsistente-soma", "inconsistente-image-maior", "inconsistente-text-diferente"} {
+		if _, err := con.gerarImagem(ctx, "gpt-image-1", caso); !errors.As(err, &ef) || ef.codigo != "fornecedor_erro" ||
+			ef.mensagem != "O fornecedor retornou um uso de tokens inconsistente." {
+			t.Fatalf("%s esperava fornecedor_erro inconsistente, veio %v", caso, err)
+		}
+	}
 	if _, err := con.gerarImagem(ctx, "gpt-image-1", "detalhes-negativos"); !errors.As(err, &ef) || ef.codigo != "fornecedor_erro" {
 		t.Fatalf("detalhes negativos esperava fornecedor_erro, veio %v", err)
 	}

@@ -115,7 +115,7 @@ func TestAC29AC35TestarModeloTextoEImagem(t *testing.T) {
 	}
 	if resImg.Servico != "imagem" || resImg.ImagemDataUrl == nil || !strings.HasPrefix(*resImg.ImagemDataUrl, "data:image/png;base64,") ||
 		resImg.Texto != nil || resImg.Imagens != 1 || resImg.CustoUsd != 0.05 || !resImg.Simulado ||
-		resImg.TokensEntrada != 12 || resImg.TokensEntradaImagem == nil || *resImg.TokensEntradaImagem != 0 ||
+		resImg.TokensEntrada != 12 || resImg.TokensEntradaImagem != nil ||
 		resImg.TokensSaida != 1258 || resImg.BasePreco == nil || *resImg.BasePreco != "imagem" {
 		t.Fatalf("resultado teste imagem inesperado: %+v", resImg)
 	}
@@ -1099,17 +1099,18 @@ func TestP3P5PrecosImagemPorTokensFormulaFallbackEProntidao(t *testing.T) {
 		t.Fatalf("fallback por imagem esperava 200, veio %d", st)
 	}
 	if resFallback.CustoUsd != 0.04 || resFallback.BasePreco == nil || *resFallback.BasePreco != "imagem" ||
-		resFallback.TokensEntrada != 12 || resFallback.TokensEntradaImagem == nil || *resFallback.TokensEntradaImagem != 500 || resFallback.TokensSaida != 1258 {
+		resFallback.TokensEntrada != 12 || resFallback.TokensEntradaImagem != nil || resFallback.TokensSaida != 1258 {
 		t.Fatalf("fallback por imagem inesperado: %+v", resFallback)
 	}
 	var pEntDB, pEntImgDB, pSaiDB, pImgDB *string
+	var tokEntImgDB *int
 	if err := api.banco.QueryRow(context.Background(), `
-		SELECT preco_token_entrada::text, preco_token_entrada_imagem::text, preco_token_saida::text, preco_imagem::text
-		FROM ia_execucoes WHERE id::text = $1`, resFallback.ExecucaoID).Scan(&pEntDB, &pEntImgDB, &pSaiDB, &pImgDB); err != nil {
+		SELECT tokens_entrada_imagem, preco_token_entrada::text, preco_token_entrada_imagem::text, preco_token_saida::text, preco_imagem::text
+		FROM ia_execucoes WHERE id::text = $1`, resFallback.ExecucaoID).Scan(&tokEntImgDB, &pEntDB, &pEntImgDB, &pSaiDB, &pImgDB); err != nil {
 		t.Fatal(err)
 	}
-	if pEntDB != nil || pEntImgDB != nil || pSaiDB != nil || pImgDB == nil {
-		t.Fatalf("fallback deveria gravar apenas preco_imagem, veio ent=%v entImg=%v sai=%v img=%v", pEntDB, pEntImgDB, pSaiDB, pImgDB)
+	if tokEntImgDB != nil || pEntDB != nil || pEntImgDB != nil || pSaiDB != nil || pImgDB == nil {
+		t.Fatalf("fallback deveria gravar tokens_entrada_imagem=NULL e apenas preco_imagem, veio tokImg=%v ent=%v entImg=%v sai=%v img=%v", tokEntImgDB, pEntDB, pEntImgDB, pSaiDB, pImgDB)
 	}
 
 	// Ao completar o 3º preço por tokens (token_saida = 40.0), tokens passam a valer no lugar do preço por imagem!
@@ -1185,7 +1186,185 @@ func TestP3P5PrecosImagemPorTokensFormulaFallbackEProntidao(t *testing.T) {
 		execs.Execucoes[2].TokensEntradaImagem == nil || *execs.Execucoes[2].TokensEntradaImagem != 500 {
 		t.Fatalf("registro OpenAI por tokens inesperado: %+v", execs.Execucoes[2])
 	}
-	if execs.Execucoes[3].BasePreco == nil || *execs.Execucoes[3].BasePreco != "imagem" {
+	if execs.Execucoes[3].BasePreco == nil || *execs.Execucoes[3].BasePreco != "imagem" || execs.Execucoes[3].TokensEntradaImagem != nil {
 		t.Fatalf("registro fallback por imagem inesperado: %+v", execs.Execucoes[3])
 	}
+}
+
+func TestImagemConjuntoParcialEBasesSemUso(t *testing.T) {
+	api := novaAPIAdminTeste(t)
+	agoraFixo := time.Date(2026, 11, 27, 11, 0, 0, 0, fusoSaoPaulo)
+	api.agora = func() time.Time { return agoraFixo }
+
+	c := novoCliente(t, api)
+	entrarComoPaulo(t, c)
+
+	imgBase64 := base64.StdEncoding.EncodeToString(pngMinimo)
+	var devolverUso atomic.Bool // false -> resposta sem usage (tokens = 0)
+	srvOAI := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/images/generations" {
+			w.WriteHeader(404)
+			return
+		}
+		resp := map[string]any{
+			"data": []map[string]string{{"b64_json": imgBase64}},
+		}
+		if devolverUso.Load() {
+			resp["usage"] = map[string]any{
+				"input_tokens":  12,
+				"output_tokens": 100,
+			}
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srvOAI.Close()
+
+	api.permitirRedeInterna = true
+	api.tlsTeste = srvOAI.Client().Transport.(*http.Transport).TLSClientConfig
+
+	var forn Fornecedor
+	if st := c.pedir("POST", "/api/admin/fornecedores", map[string]any{
+		"nome":            "OpenAI Sem Uso",
+		"tipo":            "compativel_openai",
+		"endereco":        srvOAI.URL + "/v1",
+		"chave":           chaveAPITeste,
+		"limiteMensalUsd": 100,
+	}, &forn); st != 201 {
+		t.Fatalf("criar fornecedor falhou: %d", st)
+	}
+
+	criarMod := func(ident string) Modelo {
+		var m Modelo
+		if st := c.pedir("POST", "/api/admin/fornecedores/"+forn.ID+"/modelos", map[string]any{
+			"identificador": ident, "servico": "imagem", "origem": "manual",
+		}, &m); st != 201 {
+			t.Fatalf("criar modelo %s falhou: %d", ident, st)
+		}
+		return m
+	}
+
+	t.Run("conjunto_parcial_sem_preco_por_imagem_recusado", func(t *testing.T) {
+		m := criarMod("img-parcial-sem-fallback")
+		// 1 preço de token.
+		if st := c.pedir("POST", "/api/admin/modelos/"+m.ID+"/precos", map[string]any{
+			"unidade": "token_entrada", "precoUsd": 5.0, "vigenciaInicio": "2026-11-01",
+		}, nil); st != 201 {
+			t.Fatalf("preço 1 falhou: %d", st)
+		}
+		if st := c.pedir("PUT", "/api/admin/atividades/imagem", map[string]any{
+			"modeloPrincipalId": m.ID, "modeloReservaId": nil,
+		}, nil); st != 200 {
+			t.Fatalf("PUT atividade falhou: %d", st)
+		}
+		var atvs RespostaAtividades
+		c.pedir("GET", "/api/admin/atividades", nil, &atvs)
+		var rotaImg RotaAtividade
+		for _, a := range atvs.Atividades {
+			if a.Atividade == "imagem" {
+				rotaImg = a
+			}
+		}
+		if rotaImg.Pronta || len(rotaImg.Falta) != 1 || rotaImg.Falta[0] != "preço do modelo principal" {
+			t.Fatalf("1 preço parcial deveria faltar preço do modelo principal: %+v", rotaImg)
+		}
+		if st, body := c.pedirComCorpo("POST", "/api/admin/modelos/"+m.ID+"/testar", nil); st != 409 || !strings.Contains(string(body), "sem_preco") {
+			t.Fatalf("1 preço parcial esperava 409 sem_preco, veio %d (%s)", st, body)
+		}
+
+		// 2 preços de token (ainda falta token_saida).
+		if st := c.pedir("POST", "/api/admin/modelos/"+m.ID+"/precos", map[string]any{
+			"unidade": "token_entrada_imagem", "precoUsd": 10.0, "vigenciaInicio": "2026-11-01",
+		}, nil); st != 201 {
+			t.Fatalf("preço 2 falhou: %d", st)
+		}
+		if st, body := c.pedirComCorpo("POST", "/api/admin/atividades/imagem/testar", nil); st != 409 ||
+			!strings.Contains(string(body), "atividade_incompleta") || !strings.Contains(string(body), "preço do modelo principal") {
+			t.Fatalf("2 preços parciais esperava 409 atividade_incompleta citando preço do modelo principal, veio %d (%s)", st, body)
+		}
+	})
+
+	t.Run("conjunto_parcial_com_preco_por_imagem_usa_base_imagem", func(t *testing.T) {
+		m := criarMod("img-parcial-com-fallback")
+		c.pedir("POST", "/api/admin/modelos/"+m.ID+"/precos", map[string]any{
+			"unidade": "token_entrada", "precoUsd": 5.0, "vigenciaInicio": "2026-11-01",
+		}, nil)
+		c.pedir("POST", "/api/admin/modelos/"+m.ID+"/precos", map[string]any{
+			"unidade": "imagem", "precoUsd": 0.04, "vigenciaInicio": "2026-11-01",
+		}, nil)
+		devolverUso.Store(true)
+		var res ResultadoTeste
+		if st := c.pedir("POST", "/api/admin/modelos/"+m.ID+"/testar", nil, &res); st != 200 {
+			t.Fatalf("conjunto parcial com preço por imagem esperava 200, veio %d", st)
+		}
+		if res.CustoUsd != 0.04 || res.BasePreco == nil || *res.BasePreco != "imagem" || res.TokensEntradaImagem != nil {
+			t.Fatalf("esperava base imagem e tokensEntradaImagem=nil, veio %+v", res)
+		}
+	})
+
+	t.Run("base_tokens_sem_uso_sem_preco_imagem_falha_422", func(t *testing.T) {
+		m := criarMod("img-tokens-sem-uso")
+		c.pedir("POST", "/api/admin/modelos/"+m.ID+"/precos", map[string]any{
+			"unidade": "token_entrada", "precoUsd": 5.0, "vigenciaInicio": "2026-11-01",
+		}, nil)
+		c.pedir("POST", "/api/admin/modelos/"+m.ID+"/precos", map[string]any{
+			"unidade": "token_entrada_imagem", "precoUsd": 10.0, "vigenciaInicio": "2026-11-01",
+		}, nil)
+		c.pedir("POST", "/api/admin/modelos/"+m.ID+"/precos", map[string]any{
+			"unidade": "token_saida", "precoUsd": 40.0, "vigenciaInicio": "2026-11-01",
+		}, nil)
+		devolverUso.Store(false)
+
+		st, body := c.pedirComCorpo("POST", "/api/admin/modelos/"+m.ID+"/testar", nil)
+		if st != 422 || !strings.Contains(string(body), "fornecedor_erro") || !strings.Contains(string(body), "não informou o uso de tokens") {
+			t.Fatalf("base tokens sem uso e sem preço imagem esperava 422 fornecedor_erro, veio %d (%s)", st, body)
+		}
+
+		var statusDB string
+		var custoDB float64
+		if err := api.banco.QueryRow(context.Background(), `
+			SELECT status, custo_usd::float8
+			FROM ia_execucoes WHERE modelo_id::text = $1
+			ORDER BY criado_em DESC LIMIT 1`, m.ID).Scan(&statusDB, &custoDB); err != nil {
+			t.Fatal(err)
+		}
+		if statusDB != "falha" || custoDB != 0 {
+			t.Fatalf("esperava registro status='falha' custo=0, veio status=%s custo=%v", statusDB, custoDB)
+		}
+	})
+
+	t.Run("base_tokens_sem_uso_com_preco_imagem_faz_fallback", func(t *testing.T) {
+		m := criarMod("img-tokens-sem-uso-com-fallback")
+		c.pedir("POST", "/api/admin/modelos/"+m.ID+"/precos", map[string]any{
+			"unidade": "token_entrada", "precoUsd": 5.0, "vigenciaInicio": "2026-11-01",
+		}, nil)
+		c.pedir("POST", "/api/admin/modelos/"+m.ID+"/precos", map[string]any{
+			"unidade": "token_entrada_imagem", "precoUsd": 10.0, "vigenciaInicio": "2026-11-01",
+		}, nil)
+		c.pedir("POST", "/api/admin/modelos/"+m.ID+"/precos", map[string]any{
+			"unidade": "token_saida", "precoUsd": 40.0, "vigenciaInicio": "2026-11-01",
+		}, nil)
+		c.pedir("POST", "/api/admin/modelos/"+m.ID+"/precos", map[string]any{
+			"unidade": "imagem", "precoUsd": 0.04, "vigenciaInicio": "2026-11-01",
+		}, nil)
+		devolverUso.Store(false)
+
+		var res ResultadoTeste
+		if st := c.pedir("POST", "/api/admin/modelos/"+m.ID+"/testar", nil, &res); st != 200 {
+			t.Fatalf("base tokens sem uso com fallback imagem esperava 200, veio %d", st)
+		}
+		if res.CustoUsd != 0.04 || res.BasePreco == nil || *res.BasePreco != "imagem" || res.TokensEntradaImagem != nil {
+			t.Fatalf("esperava fallback por imagem com custo 0.04 e tokensEntradaImagem=nil, veio %+v", res)
+		}
+
+		var tokImgDB *int
+		var pEntDB, pImgDB *string
+		if err := api.banco.QueryRow(context.Background(), `
+			SELECT tokens_entrada_imagem, preco_token_entrada::text, preco_imagem::text
+			FROM ia_execucoes WHERE id::text = $1`, res.ExecucaoID).Scan(&tokImgDB, &pEntDB, &pImgDB); err != nil {
+			t.Fatal(err)
+		}
+		if tokImgDB != nil || pEntDB != nil || pImgDB == nil {
+			t.Fatalf("fallback sem uso deveria gravar tokens_entrada_imagem=NULL e apenas preco_imagem, veio tokImg=%v ent=%v img=%v", tokImgDB, pEntDB, pImgDB)
+		}
+	})
 }
